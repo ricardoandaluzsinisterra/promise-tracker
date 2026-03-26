@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: bitnami/kafka:latest
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: promise_tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  promises-service:
+    build:
+      context: "./Promises Service"
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    depends_on:
+      - kafka
+      - postgres
+
+  politicians-service:
+    build:
+      context: "./Politicians Service"
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+    depends_on:
+      - kafka
+      - postgres
+
+  trackers-service:
+    build:
+      context: "./Trackers Service"
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8000"
+    depends_on:
+      - kafka
+      - postgres
+
+  sources-service:
+    build:
+      context: "./Sources Service"
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8000"
+    depends_on:
+      - kafka
+      - postgres
+
+  api-gateway:
+    build:
+      context: "./API Gateway"
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      - kafka
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
