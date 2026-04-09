@@ -7,6 +7,8 @@ services:
       - ALLOW_ANONYMOUS_LOGIN=yes
     ports:
       - "2181:2181"
+    volumes:
+      - zookeeper_data:/bitnami/zookeeper
 
   kafka:
     image: bitnami/kafka:latest
@@ -19,17 +21,8 @@ services:
       - "9092:9092"
     depends_on:
       - zookeeper
-
-  postgres:
-    image: postgres:14
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: promise_tracker
-    ports:
-      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - kafka_data:/bitnami/kafka
 
   promises-service:
     build:
@@ -38,8 +31,10 @@ services:
     ports:
       - "8001:8000"
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_started
+      postgres-promises:
+        condition: service_healthy
 
   politicians-service:
     build:
@@ -48,8 +43,10 @@ services:
     ports:
       - "8002:8000"
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_started
+      postgres-politicians:
+        condition: service_healthy
 
   trackers-service:
     build:
@@ -58,8 +55,10 @@ services:
     ports:
       - "8003:8000"
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_started
+      postgres-trackers:
+        condition: service_healthy
 
   sources-service:
     build:
@@ -68,8 +67,10 @@ services:
     ports:
       - "8004:8000"
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_started
+      postgres-sources:
+        condition: service_healthy
 
   api-gateway:
     build:
@@ -79,8 +80,84 @@ services:
       - "8000:8000"
     depends_on:
       - kafka
-      - postgres
 
+# AI Prompt:
+# I need separated postgres instances for each service (except the API Gateway), could you generate this and make sure to identify them properly? 
+# Also make sure that all of the services include a depends tag so that they dont start until their DB instance is up and running.
+
+  postgres-promises:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: promises_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-promises-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-politicians:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: politicians_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-politicians-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-trackers:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: trackers_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-trackers-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres-sources:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: sources_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-sources-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 volumes:
-  postgres_data:
-    driver: local
+  zookeeper_data:
+  kafka_data:
+  postgres-promises-data:
+  postgres-politicians-data:
+  postgres-trackers-data:
+  postgres-sources-data:
+
+
