@@ -90,6 +90,20 @@ services:
       postgres-sources:
         condition: service_healthy
 
+  projection-service:
+    build:
+      context: "./Projection Service"
+      dockerfile: Dockerfile
+    environment:
+      KAFKA_BROKER: "kafka:9092"
+    ports:
+      - "8005:8000"
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres-projection:
+        condition: service_healthy
+
   api-gateway:
     build:
       context: "./API Gateway"
@@ -170,6 +184,23 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  postgres-projection:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: projection_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres-projection-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 volumes:
   zookeeper_data:
   kafka_data:
@@ -177,5 +208,6 @@ volumes:
   postgres-politicians-data:
   postgres-trackers-data:
   postgres-sources-data:
+  postgres-projection-data:
 
 
