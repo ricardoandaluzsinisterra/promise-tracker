@@ -5,8 +5,6 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
       ZOOKEEPER_SYNC_LIMIT: 2
-    ports:
-      - "2181:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
     healthcheck:
@@ -15,6 +13,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -27,8 +27,6 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       CONFLUENT_SUPPORT_METRICS_ENABLE: 'false'
-    ports:
-      - "9092:9092"
     depends_on:
       - zookeeper
     volumes:
@@ -39,6 +37,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - internal
 
   promises-service:
     build:
@@ -46,49 +46,55 @@ services:
       dockerfile: Dockerfile
     environment:
       KAFKA_BROKER: "kafka:9092"
-    ports:
-      - "8001:8000"
     depends_on:
       kafka:
         condition: service_healthy
       postgres-promises:
         condition: service_healthy
+    networks:
+      - internal
 
   politicians-service:
     build:
       context: "./Politicians Service"
       dockerfile: Dockerfile
-    ports:
-      - "8002:8000"
+    environment:
+      KAFKA_BROKER: "kafka:9092"
     depends_on:
       kafka:
         condition: service_started
       postgres-politicians:
         condition: service_healthy
+    networks:
+      - internal
 
   trackers-service:
     build:
       context: "./Trackers Service"
       dockerfile: Dockerfile
-    ports:
-      - "8003:8000"
+    environment:
+      KAFKA_BROKER: "kafka:9092"
     depends_on:
       kafka:
         condition: service_started
       postgres-trackers:
         condition: service_healthy
+    networks:
+      - internal
 
   sources-service:
     build:
       context: "./Sources Service"
       dockerfile: Dockerfile
-    ports:
-      - "8004:8000"
+    environment:
+      KAFKA_BROKER: "kafka:9092"
     depends_on:
       kafka:
         condition: service_started
       postgres-sources:
         condition: service_healthy
+    networks:
+      - internal
 
   projection-service:
     build:
@@ -96,22 +102,40 @@ services:
       dockerfile: Dockerfile
     environment:
       KAFKA_BROKER: "kafka:9092"
-    ports:
-      - "8005:8000"
     depends_on:
       kafka:
         condition: service_started
       postgres-projection:
         condition: service_healthy
+    networks:
+      - internal
 
   api-gateway:
     build:
       context: "./API Gateway"
       dockerfile: Dockerfile
+    environment:
+      PROMISES_SERVICE_URL: "http://promises-service:8000"
+      POLITICIANS_SERVICE_URL: "http://politicians-service:8000"
+      TRACKERS_SERVICE_URL: "http://trackers-service:8000"
+      SOURCES_SERVICE_URL: "http://sources-service:8000"
+      PROJECTION_SERVICE_URL: "http://projection-service:8000"
     ports:
       - "8000:8000"
     depends_on:
-      - kafka
+      promises-service:
+        condition: service_started
+      politicians-service:
+        condition: service_started
+      trackers-service:
+        condition: service_started
+      sources-service:
+        condition: service_started
+      projection-service:
+        condition: service_started
+    networks:
+      - internal
+      - public
 
 # AI Prompt:
 # I need separated postgres instances for each service (except the API Gateway), could you generate this and make sure to identify them properly? 
@@ -123,8 +147,6 @@ services:
       POSTGRES_DB: promises_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-promises-data:/var/lib/postgresql/data
     healthcheck:
@@ -133,6 +155,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 
   postgres-politicians:
     image: postgres:17
@@ -140,8 +164,6 @@ services:
       POSTGRES_DB: politicians_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5433:5432"
     volumes:
       - postgres-politicians-data:/var/lib/postgresql/data
     healthcheck:
@@ -150,6 +172,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 
   postgres-trackers:
     image: postgres:17
@@ -157,8 +181,6 @@ services:
       POSTGRES_DB: trackers_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5434:5432"
     volumes:
       - postgres-trackers-data:/var/lib/postgresql/data
     healthcheck:
@@ -167,6 +189,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 
   postgres-sources:
     image: postgres:17
@@ -174,8 +198,6 @@ services:
       POSTGRES_DB: sources_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5435:5432"
     volumes:
       - postgres-sources-data:/var/lib/postgresql/data
     healthcheck:
@@ -184,6 +206,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 
   postgres-projection:
     image: postgres:17
@@ -191,8 +215,6 @@ services:
       POSTGRES_DB: projection_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5436:5432"
     volumes:
       - postgres-projection-data:/var/lib/postgresql/data
     healthcheck:
@@ -201,6 +223,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - internal
 volumes:
   zookeeper_data:
   kafka_data:
@@ -209,5 +233,10 @@ volumes:
   postgres-trackers-data:
   postgres-sources-data:
   postgres-projection-data:
+
+networks:
+  internal:
+    internal: true
+  public:
 
 
