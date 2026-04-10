@@ -6,6 +6,12 @@ the endpoints using the api gateway, it can have a little TUI that lets you sele
 
 Simple interactive tester for API Gateway endpoints.
 
+The TUI is intentionally beginner-friendly:
+- guided prompts for each body field
+- path parameters with defaults
+- no raw JSON editing required
+- no query-string input in normal flow
+
 Usage:
   python gateway_tui_tester.py
   python gateway_tui_tester.py --all
@@ -17,10 +23,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any
-from urllib import error, parse, request
+from urllib import error, request
+
+
+@dataclass(frozen=True)
+class BodyField:
+    key: str
+    label: str
+    kind: str = "str"  # supported: str, int
+    required: bool = True
+    default: str | int | None = None
+    default_from_value: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,24 +45,83 @@ class Endpoint:
     name: str
     method: str
     path_template: str
-    default_body: dict[str, Any] | None = None
+    body_fields: tuple[BodyField, ...] = ()
+    sample_body: dict[str, Any] | None = None
 
 
 ENDPOINTS: list[Endpoint] = [
     Endpoint("Health", "GET", "/health"),
-    Endpoint("Create promise", "POST", "/promises", default_body={}),
+    Endpoint(
+        "Create promise",
+        "POST",
+        "/promises",
+        body_fields=(
+            BodyField("title", "Title", default="Build 100 schools"),
+            BodyField("description", "Description", required=False, default=""),
+            BodyField("politician_id", "Politician ID", default_from_value="politician_id"),
+        ),
+        sample_body={
+            "title": "Build 100 schools",
+            "description": "National education plan",
+            "politician_id": "pol-001",
+        },
+    ),
     Endpoint("Get promise", "GET", "/promises/{promise_id}"),
-    Endpoint("Patch promise", "PATCH", "/promises/{promise_id}", default_body={}),
-    Endpoint("Create politician", "POST", "/politicians", default_body={}),
+    Endpoint(
+        "Patch promise",
+        "PATCH",
+        "/promises/{promise_id}",
+        body_fields=(
+            BodyField("title", "Title", required=False, default=""),
+            BodyField("description", "Description", required=False, default=""),
+        ),
+        sample_body={"title": "Updated promise title"},
+    ),
+    Endpoint(
+        "Create politician",
+        "POST",
+        "/politicians",
+        body_fields=(
+            BodyField("name", "Name", default="Jane Doe"),
+            BodyField("role", "Role", default="Senator"),
+        ),
+        sample_body={"name": "Jane Doe", "role": "Senator"},
+    ),
     Endpoint("Get politician", "GET", "/politicians/{politician_id}"),
     Endpoint("Get tracking", "GET", "/tracking/{promise_id}"),
-    Endpoint("Patch tracking", "PATCH", "/tracking/{promise_id}", default_body={}),
-    Endpoint("Create source", "POST", "/sources", default_body={}),
-    Endpoint("Link source", "POST", "/sources/link", default_body={}),
+    Endpoint(
+        "Patch tracking",
+        "PATCH",
+        "/tracking/{promise_id}",
+        body_fields=(BodyField("progress", "Progress", kind="int", default=50),),
+        sample_body={"progress": 50},
+    ),
+    Endpoint(
+        "Create source",
+        "POST",
+        "/sources",
+        body_fields=(
+            BodyField("name", "Source name", default="Official Report"),
+            BodyField("url", "Source URL", default="https://example.com/report"),
+        ),
+        sample_body={"name": "Official Report", "url": "https://example.com/report"},
+    ),
+    Endpoint(
+        "Link source",
+        "POST",
+        "/sources/link",
+        body_fields=(
+            BodyField("promise_id", "Promise ID", default_from_value="promise_id"),
+            BodyField("source_id", "Source ID", default_from_value="source_id"),
+        ),
+        sample_body={"promise_id": "1", "source_id": "source-001"},
+    ),
     Endpoint("Get sources by promise", "GET", "/sources/promise/{promise_id}"),
     Endpoint("Query promises", "GET", "/query/promises"),
     Endpoint("Query promise by id", "GET", "/query/promises/{promise_id}"),
 ]
+
+PATH_PARAM_PATTERN = re.compile(r"{([^{}]+)}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,20 +139,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--promise-id", default="1", help="Default promise_id for path params")
     parser.add_argument("--politician-id", default="1", help="Default politician_id for path params")
+    parser.add_argument("--source-id", default="source-001", help="Default source_id for linking sources")
     parser.add_argument("--all", action="store_true", help="Run all endpoint tests once and exit")
     return parser.parse_args()
 
 
-def build_url(base_url: str, endpoint: Endpoint, values: dict[str, str], query: str = "") -> str:
+def build_url(base_url: str, endpoint: Endpoint, values: dict[str, str]) -> str:
     path = endpoint.path_template.format(**values)
-    url = base_url.rstrip("/") + path
-    normalized = query.lstrip("?").strip()
-    if normalized:
-        # Preserve user-entered order and repeated keys.
-        pairs = parse.parse_qsl(normalized, keep_blank_values=True)
-        if pairs:
-            url = f"{url}?{parse.urlencode(pairs)}"
-    return url
+    return base_url.rstrip("/") + path
 
 
 def send_request(
@@ -126,30 +196,102 @@ def decode_response_body(headers: dict[str, str], body: bytes) -> str:
     return text
 
 
-def choose_body(default_body: dict[str, Any] | None, interactive: bool) -> dict[str, Any] | None:
-    if default_body is None:
+def prompt_text(label: str, required: bool, default: str | int | None = None) -> str:
+    prompt = f"{label}"
+    if default is not None:
+        prompt += f" [{default}]"
+    prompt += ": "
+
+    while True:
+        value = input(prompt).strip()
+        if value:
+            return value
+        if default is not None:
+            return str(default)
+        if not required:
+            return ""
+        print("This field is required.")
+
+
+def prompt_int(label: str, required: bool, default: int | None = None) -> int | None:
+    while True:
+        raw = prompt_text(label=label, required=required, default=default)
+        if not raw and not required:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            print("Please enter a whole number.")
+
+
+def path_param_names(endpoint: Endpoint) -> list[str]:
+    return PATH_PARAM_PATTERN.findall(endpoint.path_template)
+
+
+def resolve_path_values(endpoint: Endpoint, values: dict[str, str], interactive: bool) -> dict[str, str]:
+    resolved = dict(values)
+
+    for param_name in path_param_names(endpoint):
+        default = resolved.get(param_name, "1")
+        if interactive:
+            pretty_name = param_name.replace("_", " ").title()
+            chosen = prompt_text(pretty_name, required=True, default=default)
+            resolved[param_name] = chosen
+            # Keep these as new defaults for later menu actions.
+            values[param_name] = chosen
+        else:
+            resolved[param_name] = default
+
+    return resolved
+
+
+def build_default_body(endpoint: Endpoint, values: dict[str, str]) -> dict[str, Any] | None:
+    if not endpoint.body_fields and endpoint.sample_body is None:
+        return None
+
+    if endpoint.sample_body is not None:
+        body: dict[str, Any] = dict(endpoint.sample_body)
+    else:
+        body = {}
+
+    for field in endpoint.body_fields:
+        if field.default_from_value:
+            body[field.key] = values.get(field.default_from_value, "")
+
+    return body
+
+
+def collect_body(endpoint: Endpoint, values: dict[str, str], interactive: bool) -> dict[str, Any] | None:
+    if not endpoint.body_fields and endpoint.sample_body is None:
         return None
 
     if not interactive:
-        return default_body
+        return build_default_body(endpoint, values)
 
-    print("Default JSON body:")
-    print(json.dumps(default_body, indent=2, ensure_ascii=True))
-    user_input = input("Press Enter to use default, or enter JSON body: ").strip()
-    if not user_input:
-        return default_body
+    print("Fill in request fields (press Enter to accept defaults).")
+    body: dict[str, Any] = {}
 
-    while True:
-        try:
-            parsed = json.loads(user_input)
-            if not isinstance(parsed, dict):
-                print("Body must be a JSON object. Try again.")
-                user_input = input("Enter JSON body: ").strip()
+    for field in endpoint.body_fields:
+        default = field.default
+        if field.default_from_value:
+            default = values.get(field.default_from_value, default)
+
+        if field.kind == "int":
+            int_default = int(default) if isinstance(default, int) else None
+            entered = prompt_int(label=field.label, required=field.required, default=int_default)
+            if entered is None and not field.required:
                 continue
-            return parsed
-        except json.JSONDecodeError as exc:
-            print(f"Invalid JSON ({exc}).")
-            user_input = input("Enter JSON body: ").strip()
+            if entered is not None:
+                body[field.key] = entered
+            continue
+
+        entered_text = prompt_text(label=field.label, required=field.required, default=default)
+        if not entered_text and not field.required:
+            continue
+        body[field.key] = entered_text
+
+    return body
+
 
 
 def run_endpoint(
@@ -159,12 +301,18 @@ def run_endpoint(
     values: dict[str, str],
     interactive: bool,
 ) -> tuple[bool, int | None]:
-    query = ""
-    if interactive:
-        query = input("Optional query string (example: trace=1): ").strip()
+    path_values = resolve_path_values(endpoint, values, interactive)
+    body = collect_body(endpoint, values, interactive)
+    url = build_url(base_url, endpoint, path_values)
 
-    body = choose_body(endpoint.default_body, interactive)
-    url = build_url(base_url, endpoint, values, query=query)
+    if interactive and body is not None:
+        print("Request body preview:")
+        print(json.dumps(body, indent=2, ensure_ascii=True))
+        should_send = input("Send request? [Y/n]: ").strip().lower()
+        if should_send == "n":
+            print("Request canceled.")
+            return True, None
+
 
     print("-" * 72)
     print(f"{endpoint.method} {url}")
@@ -195,6 +343,7 @@ def print_menu(base_url: str, timeout: float, values: dict[str, str]) -> None:
     print(f"Timeout (seconds): {timeout}")
     print(f"promise_id       : {values['promise_id']}")
     print(f"politician_id    : {values['politician_id']}")
+    print(f"source_id        : {values['source_id']}")
     print("-" * 72)
 
     for idx, endpoint in enumerate(ENDPOINTS, start=1):
@@ -213,6 +362,7 @@ def settings_menu(base_url: str, timeout: float, values: dict[str, str]) -> tupl
         print("2. Change timeout")
         print("3. Change default promise_id")
         print("4. Change default politician_id")
+        print("5. Change default source_id")
         print("b. Back")
 
         choice = input("Select option: ").strip().lower()
@@ -240,6 +390,10 @@ def settings_menu(base_url: str, timeout: float, values: dict[str, str]) -> tupl
             new_politician_id = input("New default politician_id: ").strip()
             if new_politician_id:
                 values["politician_id"] = new_politician_id
+        elif choice == "5":
+            new_source_id = input("New default source_id: ").strip()
+            if new_source_id:
+                values["source_id"] = new_source_id
         elif choice == "b":
             return base_url, timeout, values
         else:
@@ -284,6 +438,7 @@ def main() -> int:
     values = {
         "promise_id": str(args.promise_id),
         "politician_id": str(args.politician_id),
+        "source_id": str(args.source_id),
     }
     base_url = args.base_url
     timeout = args.timeout
