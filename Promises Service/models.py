@@ -24,8 +24,8 @@ class Promise(Base):
     description: Mapped[str] = mapped_column(Text, nullable=True)
     politician_id: Mapped[str] = mapped_column(String, nullable=False)
     status:      Mapped[PromiseStatus] = mapped_column(SAEnum(PromiseStatus), default=PromiseStatus.PENDING) #Pending will always be the initial state
-    created_at:  Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at:  Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class OutboxEvent(Base):
     __tablename__ = "outbox_events"
@@ -35,4 +35,4 @@ class OutboxEvent(Base):
     aggregate_id: Mapped[str] = mapped_column(String, nullable=False)  # the promise_id
     payload:      Mapped[str] = mapped_column(Text, nullable=False)     # JSON string
     status:       Mapped[OutboxStatus] = mapped_column(SAEnum(OutboxStatus), default=OutboxStatus.PENDING)
-    created_at:   Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at:   Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
