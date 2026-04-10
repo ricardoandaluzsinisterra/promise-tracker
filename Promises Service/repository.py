@@ -39,30 +39,31 @@ class PromiseRepository:
         
         return promise
     
-    async def retract_promise(self, database: AsyncSession, promise: Promise):
-        get_promise = await database.execute(select(Promise).where(Promise.id == promise.id))
+    async def retract_promise(self, database: AsyncSession, promise_id: str):
+        get_promise = await database.execute(select(Promise).where(Promise.id == promise_id))
         promise_from_db = get_promise.scalar_one_or_none()
-        
-        if promise_from_db == None:
+
+        if promise_from_db is None:
             return None
-        
-        # Live SQL Alchemy instance, allows to set attributes directly
+
+        # Live SQLAlchemy instance, allows setting attributes directly
         promise_from_db.status = PromiseStatus.RETRACTING
-        
+
         retract_promise_payload = build_promise_retracted_payload(
             promise_id=promise_from_db.id,
         )
-        
+
         outbox_event = OutboxEvent(
-            event_type= PROMISE_RETRACTED,
-            aggregate_id= promise.id,
-            payload= retract_promise_payload
+            event_type=PROMISE_RETRACTED,
+            aggregate_id=promise_from_db.id,
+            payload=retract_promise_payload,
+            status=OutboxStatus.PENDING
         )
-        
+
         database.add(outbox_event)
-        
+
         await database.commit()
-        
+
         return promise_from_db
     
     '''
