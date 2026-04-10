@@ -1,13 +1,11 @@
-# repository.py
-import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from models import Promise, OutboxEvent, PromiseStatus, OutboxStatus
-from schemas import CreatePromiseCommand, UpdatePromiseCommand
+from schemas import CreatePromiseCommand
 from events import (
     build_promise_created_payload,
     build_promise_retracted_payload,
-    PROMISE_CREATED, PROMISE_RETRACTED, KAFKA_TOPIC
+    PROMISE_CREATED, PROMISE_RETRACTED
 )
 
 class PromiseRepository:
@@ -28,7 +26,8 @@ class PromiseRepository:
         outbox_event = OutboxEvent(
             event_type= PROMISE_CREATED,
             aggregate_id= promise.id,
-            payload= create_promise_payload
+            payload= create_promise_payload,
+            status=OutboxStatus.PENDING
         )
         
         # Add both atomically
@@ -37,6 +36,8 @@ class PromiseRepository:
 
         #Commit both at the same time
         await database.commit()
+        
+        return promise
     
     async def retract_promise(self, database: AsyncSession, promise: Promise):
         get_promise = await database.execute(select(Promise).where(Promise.id == promise.id))
@@ -63,5 +64,26 @@ class PromiseRepository:
         await database.commit()
         
         return promise_from_db
-        
+    
+    '''
+    AI Prompt:
+    Create two functions, one for marking a promise status as active, by ID, and another
+    marking it as failed.
+    '''
+    
+    async def mark_failed(self, db: AsyncSession, promise_id: str):
+        await db.execute(
+            update(Promise)
+            .where(Promise.id == promise_id)
+            .values(status=PromiseStatus.FAILED)
+        )
+        await db.commit()
+
+    async def mark_active(self, db: AsyncSession, promise_id: str):
+        await db.execute(
+            update(Promise)
+            .where(Promise.id == promise_id)
+            .values(status=PromiseStatus.ACTIVE)
+        )
+        await db.commit()
         
