@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
 sqlalchemy[asyncio]
-aiosqlite
+asyncpg
 aiokafka
 pydantic

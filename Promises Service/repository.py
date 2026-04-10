@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+import uuid
 from models import Promise, OutboxEvent, PromiseStatus, OutboxStatus
 from schemas import CreatePromiseCommand
 from events import (
@@ -11,22 +12,24 @@ from events import (
 class PromiseRepository:
     
     async def create_promise(self, database: AsyncSession, command: CreatePromiseCommand):
+        promise_id = str(uuid.uuid4())
         promise = Promise(
-            title= CreatePromiseCommand.title,
-            description= CreatePromiseCommand.description,
-            politician_id= CreatePromiseCommand.politician_id
+            id=promise_id,
+            title=command.title,
+            description=command.description,
+            politician_id=command.politician_id
         )
-        
+
         create_promise_payload = build_promise_created_payload(
-            promise_id=promise.id,
+            promise_id=promise_id,
             title=promise.title,
-            politician_id= promise.politician_id
+            politician_id=promise.politician_id
         )
 
         outbox_event = OutboxEvent(
-            event_type= PROMISE_CREATED,
-            aggregate_id= promise.id,
-            payload= create_promise_payload,
+            event_type=PROMISE_CREATED,
+            aggregate_id=promise_id,
+            payload=create_promise_payload,
             status=OutboxStatus.PENDING
         )
         

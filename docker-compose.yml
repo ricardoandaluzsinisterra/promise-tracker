@@ -1,38 +1,56 @@
-version: "3.8"
-
 services:
   zookeeper:
-    image: bitnami/zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.4.0
     environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
     ports:
       - "2181:2181"
     volumes:
-      - zookeeper_data:/bitnami/zookeeper
+      - zookeeper_data:/var/lib/zookeeper/data
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 127.0.0.1 2181 | grep imok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   kafka:
-    image: bitnami/kafka:latest
+    image: confluentinc/cp-kafka:7.4.0
     environment:
-      - KAFKA_BROKER_ID=1
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      CONFLUENT_SUPPORT_METRICS_ENABLE: 'false'
     ports:
       - "9092:9092"
     depends_on:
       - zookeeper
     volumes:
-      - kafka_data:/bitnami/kafka
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   promises-service:
     build:
       context: "./Promises Service"
       dockerfile: Dockerfile
+    environment:
+      KAFKA_BROKER: "kafka:9092"
     ports:
       - "8001:8000"
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       postgres-promises:
         condition: service_healthy
 
@@ -86,7 +104,7 @@ services:
 # Also make sure that all of the services include a depends tag so that they dont start until their DB instance is up and running.
 
   postgres-promises:
-    image: postgres:latest
+    image: postgres:17
     environment:
       POSTGRES_DB: promises_db
       POSTGRES_USER: postgres
@@ -103,7 +121,7 @@ services:
       start_period: 10s
 
   postgres-politicians:
-    image: postgres:latest
+    image: postgres:17
     environment:
       POSTGRES_DB: politicians_db
       POSTGRES_USER: postgres
@@ -120,7 +138,7 @@ services:
       start_period: 10s
 
   postgres-trackers:
-    image: postgres:latest
+    image: postgres:17
     environment:
       POSTGRES_DB: trackers_db
       POSTGRES_USER: postgres
@@ -137,7 +155,7 @@ services:
       start_period: 10s
 
   postgres-sources:
-    image: postgres:latest
+    image: postgres:17
     environment:
       POSTGRES_DB: sources_db
       POSTGRES_USER: postgres
