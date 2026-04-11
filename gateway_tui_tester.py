@@ -79,7 +79,6 @@ class EvidenceStep:
     response_body: Any | None
     response_text: str
     notes: str
-    screenshot_file: str | None
     timestamp_utc: str
 
 
@@ -163,7 +162,6 @@ ENDPOINTS: list[Endpoint] = [
 ]
 
 PATH_PARAM_PATTERN = re.compile(r"{([^{}]+)}")
-STEP_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 CREATION_LOG_SEQUENCE_TEMPLATE = [
@@ -225,11 +223,6 @@ def parse_args() -> argparse.Namespace:
         default="acceptance_collection.json",
         help="Acceptance evidence JSON filename or absolute path (default: %(default)s)",
     )
-    parser.add_argument(
-        "--no-screenshot-prompts",
-        action="store_true",
-        help="Disable manual screenshot prompts in acceptance suite",
-    )
     return parser.parse_args()
 
 
@@ -272,15 +265,14 @@ def ensure_directory(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def slugify(value: str) -> str:
-    lowered = value.lower().strip()
-    return STEP_SLUG_PATTERN.sub("-", lowered).strip("-")
-
-
 def normalize_status(status_value: Any) -> str:
     if status_value is None:
         return ""
     return str(status_value).strip().upper()
+
+
+def has_non_empty_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def normalize_json(value: Any) -> Any:
@@ -301,24 +293,6 @@ def resolve_artifact_path(artifacts_dir: str, path_or_name: str) -> str:
     return os.path.join(artifacts_dir, path_or_name)
 
 
-def manual_screenshot_checkpoint(
-    order: int,
-    title: str,
-    artifacts_dir: str,
-    enabled: bool,
-) -> str:
-    screenshot_file = f"{order:02d}_{slugify(title)}.png"
-    screenshot_path = os.path.join(artifacts_dir, screenshot_file)
-
-    print("\nScreenshot checkpoint")
-    print(f"Step {order}: {title}")
-    print(f"Save screenshot as: {screenshot_path}")
-    if enabled:
-        input("Capture screenshot now, then press Enter to continue...")
-
-    return screenshot_path
-
-
 def add_evidence_step(
     collection: list[EvidenceStep],
     title: str,
@@ -332,16 +306,8 @@ def add_evidence_step(
     response_body: Any | None,
     response_text: str,
     notes: str,
-    artifacts_dir: str,
-    screenshot_prompts: bool,
 ) -> None:
     order = len(collection) + 1
-    screenshot_path = manual_screenshot_checkpoint(
-        order=order,
-        title=title,
-        artifacts_dir=artifacts_dir,
-        enabled=screenshot_prompts,
-    )
 
     step = EvidenceStep(
         order=order,
@@ -356,7 +322,6 @@ def add_evidence_step(
         response_body=normalize_json(response_body),
         response_text=response_text,
         notes=notes,
-        screenshot_file=screenshot_path,
         timestamp_utc=utc_now_iso(),
     )
     collection.append(step)
@@ -630,6 +595,58 @@ def verify_log_sequence(
     return len(missing) == 0, missing, matched_lines
 
 
+def write_grep_log_dump(
+    source_log_file: str,
+    output_file: str,
+    expected_lines: list[str],
+    missing_lines: list[str],
+    timeout: float,
+) -> tuple[bool, str]:
+    pattern_parts = [re.escape(line) for line in expected_lines]
+    grep_pattern = "|".join(pattern_parts)
+
+    if not grep_pattern:
+        with open(output_file, "w", encoding="utf-8") as dump_file:
+            dump_file.write("No expected lines provided.\n")
+        return True, f"Grep log dump saved to {output_file}"
+
+    return_code, stdout, stderr = run_command(
+        command=[
+            "grep",
+            "-nE",
+            "--color=always",
+            grep_pattern,
+            source_log_file,
+        ],
+        timeout=timeout,
+    )
+
+    if return_code not in (0, 1):
+        return False, stderr.strip() or f"Failed to generate grep dump for {output_file}"
+
+    with open(output_file, "w", encoding="utf-8") as dump_file:
+        dump_file.write("=== EXPECTED LINES ===\n")
+        for line in expected_lines:
+            dump_file.write(f"{line}\n")
+
+        dump_file.write("\n=== GREP OUTPUT (colorized ANSI) ===\n")
+        if stdout:
+            dump_file.write(stdout)
+            if not stdout.endswith("\n"):
+                dump_file.write("\n")
+        else:
+            dump_file.write("<no grep matches>\n")
+
+        dump_file.write("\n=== MISSING LINES FROM ORDERED CHECK ===\n")
+        if missing_lines:
+            for line in missing_lines:
+                dump_file.write(f"{line}\n")
+        else:
+            dump_file.write("<none>\n")
+
+    return True, f"Grep log dump saved to {output_file}"
+
+
 def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[bool, str]:
     keywords = [
         promise_id,
@@ -804,7 +821,6 @@ def run_acceptance_suite(
     artifacts_dir: str,
     evidence_json_name: str,
     log_file_name: str,
-    screenshot_prompts: bool,
 ) -> int:
     print("\nRunning ordered acceptance suite...")
     started = time.time()
@@ -823,8 +839,22 @@ def run_acceptance_suite(
     tracker_failure_promise_id = ""
     creation_log_checks: dict[str, Any] = {}
     failure_log_checks: dict[str, Any] = {}
+    creation_expected: list[str] = []
+    failure_expected: list[str] = []
+    creation_missing: list[str] = ["log capture failed"]
+    failure_missing: list[str] = ["log capture failed"]
     log_capture_ok = False
     log_capture_message = ""
+    creation_grep_dump_path = resolve_artifact_path(
+        artifacts_dir,
+        "creation_sequence_grep.log",
+    )
+    failure_grep_dump_path = resolve_artifact_path(
+        artifacts_dir,
+        "failure_sequence_grep.log",
+    )
+    creation_grep_message = ""
+    failure_grep_message = ""
 
     # Setup: create a valid politician for success and retraction scenarios.
     setup_politician_body = {
@@ -907,8 +937,6 @@ def run_acceptance_suite(
         response_body=step1_payload,
         response_text=step1_text,
         notes=f"promise_id={success_promise_id or '<missing>'}",
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     if not success_promise_id:
@@ -984,8 +1012,6 @@ def run_acceptance_suite(
         response_body=step2_payload,
         response_text=step2_text,
         notes=step2_notes,
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     # Step 3
@@ -1003,7 +1029,7 @@ def run_acceptance_suite(
             status == 200
             and isinstance(payload, dict)
             and normalize_status(payload.get("status")) == "ACTIVE"
-            and bool(str(payload.get("politician_name", "")).strip())
+            and has_non_empty_text(payload.get("politician_name"))
         ),
     )
     add_evidence_step(
@@ -1019,8 +1045,6 @@ def run_acceptance_suite(
         response_body=step3_result.payload,
         response_text=step3_result.text,
         notes=f"attempts={step3_result.attempts}",
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     # Optional setup for stronger source_count verification.
@@ -1092,8 +1116,6 @@ def run_acceptance_suite(
         response_body=step4_payload,
         response_text=step4_text,
         notes="",
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     # Step 5
@@ -1125,8 +1147,6 @@ def run_acceptance_suite(
         response_body=step5_result.payload,
         response_text=step5_result.text,
         notes=f"attempts={step5_result.attempts}",
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     # Step 6
@@ -1204,8 +1224,6 @@ def run_acceptance_suite(
             f"invalid_promise_id={invalid_promise_id or '<missing>'}, "
             f"query_attempts={step6_get_result.attempts}"
         ),
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     # Step 7
@@ -1240,6 +1258,7 @@ def run_acceptance_suite(
 
     step7_post_status: int | None = None
     step7_post_payload: Any | None = None
+    step7_post_body: dict[str, Any] | None = None
     step7_post_text = ""
     step7_post_url = base_url.rstrip("/") + "/promises"
     step7_query_result = PollResult(
@@ -1325,7 +1344,7 @@ def run_acceptance_suite(
         status=step7_query_result.status if tracker_failure_promise_id else step7_post_status,
         request_body={
             "break_trackers_db": "DROP TABLE tracking_records",
-            "promise_request": normalize_json(step7_post_payload),
+            "promise_request": normalize_json(step7_post_body),
         },
         response_body={
             "query": normalize_json(step7_query_result.payload),
@@ -1339,8 +1358,6 @@ def run_acceptance_suite(
             f"tracker_failure_promise_id={tracker_failure_promise_id or '<missing>'}, "
             f"query_attempts={step7_query_result.attempts}"
         ),
-        artifacts_dir=artifacts_dir,
-        screenshot_prompts=screenshot_prompts,
     )
 
     setup_data["step7_setup"] = step7_setup
@@ -1401,6 +1418,21 @@ def run_acceptance_suite(
             "missing": failure_missing,
             "matched_lines": failure_matched,
         }
+
+        _creation_dump_ok, creation_grep_message = write_grep_log_dump(
+            source_log_file=log_file_path,
+            output_file=creation_grep_dump_path,
+            expected_lines=creation_expected,
+            missing_lines=creation_missing,
+            timeout=max(timeout, 20),
+        )
+        _failure_dump_ok, failure_grep_message = write_grep_log_dump(
+            source_log_file=log_file_path,
+            output_file=failure_grep_dump_path,
+            expected_lines=failure_expected,
+            missing_lines=failure_missing,
+            timeout=max(timeout, 20),
+        )
     else:
         creation_log_checks = {
             "passed": False,
@@ -1414,11 +1446,29 @@ def run_acceptance_suite(
             "missing": ["log capture failed"],
             "matched_lines": [],
         }
+        with open(creation_grep_dump_path, "w", encoding="utf-8") as creation_dump:
+            creation_dump.write("Log capture failed; creation grep dump unavailable.\n")
+            creation_dump.write(f"Reason: {log_capture_message}\n")
+        with open(failure_grep_dump_path, "w", encoding="utf-8") as failure_dump:
+            failure_dump.write("Log capture failed; failure grep dump unavailable.\n")
+            failure_dump.write(f"Reason: {log_capture_message}\n")
+        creation_grep_message = f"Grep log dump saved to {creation_grep_dump_path}"
+        failure_grep_message = f"Grep log dump saved to {failure_grep_dump_path}"
 
     log_checks = {
         "capture_ok": log_capture_ok,
         "capture_message": log_capture_message,
         "log_file": log_file_path,
+        "grep_dumps": {
+            "creation": {
+                "file": creation_grep_dump_path,
+                "message": creation_grep_message,
+            },
+            "failure": {
+                "file": failure_grep_dump_path,
+                "message": failure_grep_message,
+            },
+        },
         "creation_sequence": creation_log_checks,
         "failure_sequence": failure_log_checks,
     }
@@ -1435,6 +1485,8 @@ def run_acceptance_suite(
 
     print(export_message)
     print(log_capture_message)
+    print(creation_grep_message)
+    print(failure_grep_message)
 
     all_steps_passed = all(step.passed for step in evidence_steps)
     sequence_passed = (
@@ -1803,7 +1855,6 @@ def main() -> int:
             artifacts_dir=args.artifacts_dir,
             evidence_json_name=args.evidence_json,
             log_file_name=args.log_file,
-            screenshot_prompts=not args.no_screenshot_prompts,
         )
 
     while True:
@@ -1835,7 +1886,6 @@ def main() -> int:
                 artifacts_dir=args.artifacts_dir,
                 evidence_json_name=args.evidence_json,
                 log_file_name=args.log_file,
-                screenshot_prompts=not args.no_screenshot_prompts,
             )
             continue
 

@@ -52,6 +52,7 @@ class PoliticianRepository:
 					payload = build_politician_tagged_payload(
 						promise_id=promise_id,
 						politician_id=politician_id,
+						politician_name=politician.name,
 					)
 					event_type = POLITICIAN_TAGGED
 				except Exception:

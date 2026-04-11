@@ -18,13 +18,18 @@ def _utc_timestamp() -> str:
 	return datetime.now(timezone.utc).isoformat()
 
 
-def build_politician_tagged_payload(promise_id: str, politician_id: str) -> str:
+def build_politician_tagged_payload(
+	promise_id: str,
+	politician_id: str,
+	politician_name: str,
+) -> str:
 	return json.dumps(
 		{
 			"event_type": POLITICIAN_TAGGED,
 			"saga_id": promise_id,
 			"promise_id": promise_id,
 			"politician_id": politician_id,
+			"politician_name": politician_name,
 			"timestamp": _utc_timestamp(),
 		}
 	)
