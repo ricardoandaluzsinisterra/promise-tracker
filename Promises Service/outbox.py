@@ -62,7 +62,7 @@ async def _poll_and_publish(producer: AIOKafkaProducer):
                 await database.commit()
                 logger.info(f"Published and marked SENT: {event.event_type} / {event.aggregate_id}")
                 if event.event_type == "PromiseCreated":
-                    logger.info(
+                    logger.warning(
                         f"Outbox poller in Promises Service: Published PromiseCreated for {event.aggregate_id}"
                     )
 

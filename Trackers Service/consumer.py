@@ -62,7 +62,7 @@ async def _handle_message(message):
                     politician_id=politician_id,
                 )
                 logger.info(f"Handled PoliticianTagged for {promise_id}, queued {emitted}")
-                logger.info(
+                logger.warning(
                     f"Trackers Service consumer: Handled PoliticianTagged for {promise_id}"
                 )
 

@@ -63,7 +63,7 @@ async def _handle_message(message):
 					politician_id=politician_id,
 				)
 				logger.info(f"Handled PromiseCreated for {promise_id}, queued {emitted}")
-				logger.info(
+				logger.warning(
 					f"Politicians Service consumer: Handled PromiseCreated for {promise_id}"
 				)
 
@@ -84,7 +84,7 @@ async def _handle_message(message):
 					politician_id=politician_id,
 				)
 				logger.info(f"Handled TrackingCreationFailed for {promise_id}, compensating")
-				logger.info(
+				logger.warning(
 					f"Politicians Service consumer: Handled TrackingCreationFailed for {promise_id}, compensating"
 				)
 

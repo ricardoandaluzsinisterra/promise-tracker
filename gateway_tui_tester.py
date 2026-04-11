@@ -586,18 +586,13 @@ def verify_log_sequence(
 ) -> tuple[bool, list[str], list[str]]:
     missing: list[str] = []
     matched_lines: list[str] = []
-    scan_start = 0
 
     for expected_line in expected_sequence:
-        found = False
-        for idx in range(scan_start, len(lines)):
-            if expected_line in lines[idx]:
-                matched_lines.append(lines[idx])
-                scan_start = idx + 1
-                found = True
-                break
-        if not found:
+        found_line = next((line for line in lines if expected_line in line), None)
+        if found_line is None:
             missing.append(expected_line)
+        else:
+            matched_lines.append(found_line)
 
     return len(missing) == 0, missing, matched_lines
 
