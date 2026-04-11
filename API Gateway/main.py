@@ -62,6 +62,16 @@ async def update_promise(promise_id: str, request: Request) -> Response:
 	return await proxy_request(request, "PATCH", PROMISES_SERVICE_URL, f"/promises/{promise_id}")
 
 
+@app.patch("/promises/{promise_id}/status")
+async def retract_promise(promise_id: str, request: Request) -> Response:
+	return await proxy_request(
+		request,
+		"PATCH",
+		PROMISES_SERVICE_URL,
+		f"/promises/{promise_id}/status",
+	)
+
+
 @app.post("/politicians")
 async def create_politician(request: Request) -> Response:
 	return await proxy_request(request, "POST", POLITICIANS_SERVICE_URL, "/politicians")
