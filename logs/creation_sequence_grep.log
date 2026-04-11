@@ -1,0 +1,24 @@
+=== EXPECTED LINES ===
+Outbox poller in Promises Service: Published PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252
+Politicians Service consumer: Handled PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252
+Outbox poller in Politicians Service: Published PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252
+Trackers Service consumer: Handled PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252
+Outbox poller in Trackers Service: Published TrackingCreated for c64f9fb3-544c-44a9-85eb-c80e49660252
+Projection Service consumer: updating summary, status = ACTIVE, promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252
+
+=== GREP OUTPUT (colorized ANSI) ===
+[32m[K4[m[K[36m[K:[m[Kpromises-service-1     | [01;31m[KOutbox poller in Promises Service: Published PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K42[m[K[36m[K:[m[Kprojection-service-1   | [01;31m[KProjection Service consumer: updating summary, status = ACTIVE, promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K80[m[K[36m[K:[m[Ktrackers-service-1     | [01;31m[KTrackers Service consumer: Handled PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K81[m[K[36m[K:[m[Ktrackers-service-1     | [01;31m[KOutbox poller in Trackers Service: Published TrackingCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K86[m[K[36m[K:[m[Kpoliticians-service-1  | [01;31m[KPoliticians Service consumer: Handled PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K87[m[K[36m[K:[m[Kpoliticians-service-1  | [01;31m[KOutbox poller in Politicians Service: Published PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K951[m[K[36m[K:[m[Kpromises-service-1     | [01;31m[KOutbox poller in Promises Service: Published PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K1389[m[K[36m[K:[m[Kprojection-service-1   | [01;31m[KProjection Service consumer: updating summary, status = ACTIVE, promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K2089[m[K[36m[K:[m[Ktrackers-service-1     | [01;31m[KTrackers Service consumer: Handled PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K2099[m[K[36m[K:[m[Ktrackers-service-1     | [01;31m[KOutbox poller in Trackers Service: Published TrackingCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K2373[m[K[36m[K:[m[Kpoliticians-service-1  | [01;31m[KPoliticians Service consumer: Handled PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+[32m[K2383[m[K[36m[K:[m[Kpoliticians-service-1  | [01;31m[KOutbox poller in Politicians Service: Published PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252[m[K
+
+=== MISSING LINES FROM ORDERED CHECK ===
+<none>

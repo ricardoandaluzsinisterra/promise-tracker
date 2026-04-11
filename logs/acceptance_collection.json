@@ -1,0 +1,299 @@
+{
+  "generated_at": "2026-04-11T18:33:22.468042+00:00",
+  "base_url": "http://localhost:8000",
+  "duration_seconds": 24.005,
+  "setup": {
+    "run_suffix": "502d92d5",
+    "artifacts_dir": "/tmp/gateway_acceptance_postfix_v2",
+    "valid_politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+    "source_setup": {
+      "create_source_status": 201,
+      "source_id": "f6b5e715-83c5-4471-a6cf-003ecfa0c23a",
+      "link_status": 201,
+      "link_body": {
+        "id": "51f473dc-a5d5-4106-9e9f-4a6307ed2596",
+        "promise_id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "source_id": "f6b5e715-83c5-4471-a6cf-003ecfa0c23a",
+        "linked_at": "2026-04-11T18:33:02.261164Z"
+      },
+      "link_text": "{\n  \"id\": \"51f473dc-a5d5-4106-9e9f-4a6307ed2596\",\n  \"promise_id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"source_id\": \"f6b5e715-83c5-4471-a6cf-003ecfa0c23a\",\n  \"linked_at\": \"2026-04-11T18:33:02.261164Z\"\n}"
+    },
+    "step7_setup": {
+      "broken_politician_status": 201,
+      "broken_politician_body": {
+        "id": "e2b74066-4ac2-462c-9bb4-e1b899cd3895",
+        "name": "Broken DB Politician 502d92d5",
+        "role": "Mayor",
+        "created_at": "2026-04-11T18:33:10.226542Z"
+      },
+      "broken_politician_text": "{\n  \"id\": \"e2b74066-4ac2-462c-9bb4-e1b899cd3895\",\n  \"name\": \"Broken DB Politician 502d92d5\",\n  \"role\": \"Mayor\",\n  \"created_at\": \"2026-04-11T18:33:10.226542Z\"\n}",
+      "break_trackers_db": "DROP TABLE",
+      "restore_trackers_db": "trackers-service restarted"
+    }
+  },
+  "steps": [
+    {
+      "order": 1,
+      "title": "POST /promises with a valid politician_id, showing status PENDING",
+      "method": "POST",
+      "path": "/promises",
+      "url": "http://localhost:8000/promises",
+      "expected": "201 response with status PENDING",
+      "passed": true,
+      "status": 201,
+      "request_body": {
+        "title": "Acceptance pending test 502d92d5",
+        "description": "Acceptance path for initial pending state",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d"
+      },
+      "response_body": {
+        "id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "title": "Acceptance pending test 502d92d5",
+        "description": "Acceptance path for initial pending state",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+        "status": "pending"
+      },
+      "response_text": "{\n  \"id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"title\": \"Acceptance pending test 502d92d5\",\n  \"description\": \"Acceptance path for initial pending state\",\n  \"politician_id\": \"c402ad39-628c-43bb-8089-68ea8a51509d\",\n  \"status\": \"pending\"\n}",
+      "notes": "promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "timestamp_utc": "2026-04-11T18:32:58.553109+00:00"
+    },
+    {
+      "order": 2,
+      "title": "GET /query/promises/{id} immediately after, showing status PENDING",
+      "method": "GET",
+      "path": "/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "url": "http://localhost:8000/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "expected": "200 response with status PENDING",
+      "passed": true,
+      "status": 200,
+      "request_body": null,
+      "response_body": {
+        "id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "promise_id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "title": "Acceptance pending test 502d92d5",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+        "politician_name": null,
+        "status": "PENDING",
+        "progress": 0,
+        "source_count": 0,
+        "created_at": "2026-04-11T18:33:00.076558Z",
+        "updated_at": "2026-04-11T18:33:00.076558Z"
+      },
+      "response_text": "{\n  \"id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"promise_id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"title\": \"Acceptance pending test 502d92d5\",\n  \"politician_id\": \"c402ad39-628c-43bb-8089-68ea8a51509d\",\n  \"politician_name\": null,\n  \"status\": \"PENDING\",\n  \"progress\": 0,\n  \"source_count\": 0,\n  \"created_at\": \"2026-04-11T18:33:00.076558Z\",\n  \"updated_at\": \"2026-04-11T18:33:00.076558Z\"\n}",
+      "notes": "initial_status=404, initial_projection_status=<missing>, attempts=4",
+      "timestamp_utc": "2026-04-11T18:33:00.148760+00:00"
+    },
+    {
+      "order": 3,
+      "title": "GET /query/promises/{id} a moment later, showing status ACTIVE with politician_name",
+      "method": "GET",
+      "path": "/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "url": "http://localhost:8000/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "expected": "200 response with status ACTIVE and politician_name populated",
+      "passed": true,
+      "status": 200,
+      "request_body": null,
+      "response_body": {
+        "id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "promise_id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "title": "Acceptance pending test 502d92d5",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+        "politician_name": "Acceptance Politician 502d92d5",
+        "status": "ACTIVE",
+        "progress": 0,
+        "source_count": 0,
+        "created_at": "2026-04-11T18:33:00.076558Z",
+        "updated_at": "2026-04-11T18:33:01.979522Z"
+      },
+      "response_text": "{\n  \"id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"promise_id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"title\": \"Acceptance pending test 502d92d5\",\n  \"politician_id\": \"c402ad39-628c-43bb-8089-68ea8a51509d\",\n  \"politician_name\": \"Acceptance Politician 502d92d5\",\n  \"status\": \"ACTIVE\",\n  \"progress\": 0,\n  \"source_count\": 0,\n  \"created_at\": \"2026-04-11T18:33:00.076558Z\",\n  \"updated_at\": \"2026-04-11T18:33:01.979522Z\"\n}",
+      "notes": "attempts=5",
+      "timestamp_utc": "2026-04-11T18:33:02.227548+00:00"
+    },
+    {
+      "order": 4,
+      "title": "PATCH /promises/{id}/status with status retracted, triggering retraction Saga",
+      "method": "PATCH",
+      "path": "/promises/c64f9fb3-544c-44a9-85eb-c80e49660252/status",
+      "url": "http://localhost:8000/promises/c64f9fb3-544c-44a9-85eb-c80e49660252/status",
+      "expected": "Request accepted and promise status enters retracting flow",
+      "passed": true,
+      "status": 200,
+      "request_body": {
+        "status": "retracted"
+      },
+      "response_body": {
+        "id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "title": "Acceptance pending test 502d92d5",
+        "description": "Acceptance path for initial pending state",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+        "status": "retracting"
+      },
+      "response_text": "{\n  \"id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"title\": \"Acceptance pending test 502d92d5\",\n  \"description\": \"Acceptance path for initial pending state\",\n  \"politician_id\": \"c402ad39-628c-43bb-8089-68ea8a51509d\",\n  \"status\": \"retracting\"\n}",
+      "notes": "",
+      "timestamp_utc": "2026-04-11T18:33:02.306844+00:00"
+    },
+    {
+      "order": 5,
+      "title": "GET /query/promises/{id} after retraction completes, showing ARCHIVED and source_count 0",
+      "method": "GET",
+      "path": "/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "url": "http://localhost:8000/query/promises/c64f9fb3-544c-44a9-85eb-c80e49660252",
+      "expected": "200 response with status ARCHIVED and source_count 0",
+      "passed": true,
+      "status": 200,
+      "request_body": null,
+      "response_body": {
+        "id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "promise_id": "c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "title": "Acceptance pending test 502d92d5",
+        "politician_id": "c402ad39-628c-43bb-8089-68ea8a51509d",
+        "politician_name": "Acceptance Politician 502d92d5",
+        "status": "ARCHIVED",
+        "progress": 0,
+        "source_count": 0,
+        "created_at": "2026-04-11T18:33:00.076558Z",
+        "updated_at": "2026-04-11T18:33:07.815501Z"
+      },
+      "response_text": "{\n  \"id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"promise_id\": \"c64f9fb3-544c-44a9-85eb-c80e49660252\",\n  \"title\": \"Acceptance pending test 502d92d5\",\n  \"politician_id\": \"c402ad39-628c-43bb-8089-68ea8a51509d\",\n  \"politician_name\": \"Acceptance Politician 502d92d5\",\n  \"status\": \"ARCHIVED\",\n  \"progress\": 0,\n  \"source_count\": 0,\n  \"created_at\": \"2026-04-11T18:33:00.076558Z\",\n  \"updated_at\": \"2026-04-11T18:33:07.815501Z\"\n}",
+      "notes": "attempts=12",
+      "timestamp_utc": "2026-04-11T18:33:08.070345+00:00"
+    },
+    {
+      "order": 6,
+      "title": "POST /promises with non-existent politician_id, then GET /query/promises/{id} shows FAILED",
+      "method": "POST -> GET",
+      "path": "/promises -> /query/promises/0bba8853-d6d5-4f17-bb46-8d34eba9578c",
+      "url": "http://localhost:8000/promises",
+      "expected": "Create succeeds, then projection status converges to FAILED",
+      "passed": true,
+      "status": 200,
+      "request_body": {
+        "title": "Acceptance invalid-politician 502d92d5",
+        "description": "Compensation path for invalid politician",
+        "politician_id": "missing-a5ebf25db3"
+      },
+      "response_body": {
+        "create": {
+          "id": "0bba8853-d6d5-4f17-bb46-8d34eba9578c",
+          "title": "Acceptance invalid-politician 502d92d5",
+          "description": "Compensation path for invalid politician",
+          "politician_id": "missing-a5ebf25db3",
+          "status": "pending"
+        },
+        "query": {
+          "id": "0bba8853-d6d5-4f17-bb46-8d34eba9578c",
+          "promise_id": "0bba8853-d6d5-4f17-bb46-8d34eba9578c",
+          "title": "Acceptance invalid-politician 502d92d5",
+          "politician_id": "missing-a5ebf25db3",
+          "politician_name": null,
+          "status": "FAILED",
+          "progress": 0,
+          "source_count": 0,
+          "created_at": "2026-04-11T18:33:08.146492Z",
+          "updated_at": "2026-04-11T18:33:10.028575Z"
+        }
+      },
+      "response_text": "create_text={\n  \"id\": \"0bba8853-d6d5-4f17-bb46-8d34eba9578c\",\n  \"title\": \"Acceptance invalid-politician 502d92d5\",\n  \"description\": \"Compensation path for invalid politician\",\n  \"politician_id\": \"missing-a5ebf25db3\",\n  \"status\": \"pending\"\n}\nquery_text={\n  \"id\": \"0bba8853-d6d5-4f17-bb46-8d34eba9578c\",\n  \"promise_id\": \"0bba8853-d6d5-4f17-bb46-8d34eba9578c\",\n  \"title\": \"Acceptance invalid-politician 502d92d5\",\n  \"politician_id\": \"missing-a5ebf25db3\",\n  \"politician_name\": null,\n  \"status\": \"FAILED\",\n  \"progress\": 0,\n  \"source_count\": 0,\n  \"created_at\": \"2026-04-11T18:33:08.146492Z\",\n  \"updated_at\": \"2026-04-11T18:33:10.028575Z\"\n}",
+      "notes": "invalid_promise_id=0bba8853-d6d5-4f17-bb46-8d34eba9578c, query_attempts=5",
+      "timestamp_utc": "2026-04-11T18:33:10.219586+00:00"
+    },
+    {
+      "order": 7,
+      "title": "POST /promises with valid politician and broken Trackers DB shows TrackingCreationFailed and FAILED",
+      "method": "POST -> GET",
+      "path": "/promises -> /query/promises/70bace33-d895-4f5e-b8cb-696f815cb5b0",
+      "url": "http://localhost:8000/promises",
+      "expected": "Trackers write fails, TrackingCreationFailed compensation triggers, projection shows FAILED",
+      "passed": true,
+      "status": 200,
+      "request_body": {
+        "break_trackers_db": "DROP TABLE tracking_records",
+        "promise_request": {
+          "title": "Broken trackers DB 502d92d5",
+          "description": "Real tracking DB failure compensation test",
+          "politician_id": "e2b74066-4ac2-462c-9bb4-e1b899cd3895"
+        }
+      },
+      "response_body": {
+        "query": {
+          "id": "70bace33-d895-4f5e-b8cb-696f815cb5b0",
+          "promise_id": "70bace33-d895-4f5e-b8cb-696f815cb5b0",
+          "title": "Broken trackers DB 502d92d5",
+          "politician_id": "e2b74066-4ac2-462c-9bb4-e1b899cd3895",
+          "politician_name": "Broken DB Politician 502d92d5",
+          "status": "FAILED",
+          "progress": 0,
+          "source_count": 0,
+          "created_at": "2026-04-11T18:33:12.177659Z",
+          "updated_at": "2026-04-11T18:33:15.174518Z"
+        },
+        "db": {
+          "broken_politician_status": 201,
+          "broken_politician_body": {
+            "id": "e2b74066-4ac2-462c-9bb4-e1b899cd3895",
+            "name": "Broken DB Politician 502d92d5",
+            "role": "Mayor",
+            "created_at": "2026-04-11T18:33:10.226542Z"
+          },
+          "broken_politician_text": "{\n  \"id\": \"e2b74066-4ac2-462c-9bb4-e1b899cd3895\",\n  \"name\": \"Broken DB Politician 502d92d5\",\n  \"role\": \"Mayor\",\n  \"created_at\": \"2026-04-11T18:33:10.226542Z\"\n}",
+          "break_trackers_db": "DROP TABLE",
+          "restore_trackers_db": "trackers-service restarted"
+        }
+      },
+      "response_text": "create_text={\n  \"id\": \"70bace33-d895-4f5e-b8cb-696f815cb5b0\",\n  \"title\": \"Broken trackers DB 502d92d5\",\n  \"description\": \"Real tracking DB failure compensation test\",\n  \"politician_id\": \"e2b74066-4ac2-462c-9bb4-e1b899cd3895\",\n  \"status\": \"pending\"\n}\nquery_text={\n  \"id\": \"70bace33-d895-4f5e-b8cb-696f815cb5b0\",\n  \"promise_id\": \"70bace33-d895-4f5e-b8cb-696f815cb5b0\",\n  \"title\": \"Broken trackers DB 502d92d5\",\n  \"politician_id\": \"e2b74066-4ac2-462c-9bb4-e1b899cd3895\",\n  \"politician_name\": \"Broken DB Politician 502d92d5\",\n  \"status\": \"FAILED\",\n  \"progress\": 0,\n  \"source_count\": 0,\n  \"created_at\": \"2026-04-11T18:33:12.177659Z\",\n  \"updated_at\": \"2026-04-11T18:33:15.174518Z\"\n}\ndb_break=DROP TABLE\ndb_restore=trackers-service restarted",
+      "notes": "tracker_failure_promise_id=70bace33-d895-4f5e-b8cb-696f815cb5b0, query_attempts=10",
+      "timestamp_utc": "2026-04-11T18:33:22.026070+00:00"
+    }
+  ],
+  "log_checks": {
+    "capture_ok": true,
+    "capture_message": "Logs saved to /tmp/gateway_acceptance_postfix_v2/gateway_saga_logs.txt",
+    "log_file": "/tmp/gateway_acceptance_postfix_v2/gateway_saga_logs.txt",
+    "grep_dumps": {
+      "creation": {
+        "file": "/tmp/gateway_acceptance_postfix_v2/creation_sequence_grep.log",
+        "message": "Grep log dump saved to /tmp/gateway_acceptance_postfix_v2/creation_sequence_grep.log"
+      },
+      "failure": {
+        "file": "/tmp/gateway_acceptance_postfix_v2/failure_sequence_grep.log",
+        "message": "Grep log dump saved to /tmp/gateway_acceptance_postfix_v2/failure_sequence_grep.log"
+      }
+    },
+    "creation_sequence": {
+      "passed": true,
+      "expected": [
+        "Outbox poller in Promises Service: Published PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "Politicians Service consumer: Handled PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "Outbox poller in Politicians Service: Published PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "Trackers Service consumer: Handled PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "Outbox poller in Trackers Service: Published TrackingCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "Projection Service consumer: updating summary, status = ACTIVE, promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252"
+      ],
+      "missing": [],
+      "matched_lines": [
+        "promises-service-1     | Outbox poller in Promises Service: Published PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "politicians-service-1  | Politicians Service consumer: Handled PromiseCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "politicians-service-1  | Outbox poller in Politicians Service: Published PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "trackers-service-1     | Trackers Service consumer: Handled PoliticianTagged for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "trackers-service-1     | Outbox poller in Trackers Service: Published TrackingCreated for c64f9fb3-544c-44a9-85eb-c80e49660252",
+        "projection-service-1   | Projection Service consumer: updating summary, status = ACTIVE, promise_id=c64f9fb3-544c-44a9-85eb-c80e49660252"
+      ]
+    },
+    "failure_sequence": {
+      "passed": true,
+      "expected": [
+        "Trackers Service: TrackingCreationFailed emitted for 70bace33-d895-4f5e-b8cb-696f815cb5b0",
+        "Politicians Service consumer: Handled TrackingCreationFailed for 70bace33-d895-4f5e-b8cb-696f815cb5b0, compensating",
+        "Promises Service consumer: Promise 70bace33-d895-4f5e-b8cb-696f815cb5b0 marked FAILED after TrackingCreationFailed",
+        "Projection Service consumer: status = FAILED, promise_id=70bace33-d895-4f5e-b8cb-696f815cb5b0"
+      ],
+      "missing": [],
+      "matched_lines": [
+        "trackers-service-1     | Trackers Service: TrackingCreationFailed emitted for 70bace33-d895-4f5e-b8cb-696f815cb5b0; reason=(sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedTableError'>: relation \"tracking_records\" does not exist",
+        "politicians-service-1  | Politicians Service consumer: Handled TrackingCreationFailed for 70bace33-d895-4f5e-b8cb-696f815cb5b0, compensating",
+        "promises-service-1     | Promises Service consumer: Promise 70bace33-d895-4f5e-b8cb-696f815cb5b0 marked FAILED after TrackingCreationFailed",
+        "projection-service-1   | Projection Service consumer: status = FAILED, promise_id=70bace33-d895-4f5e-b8cb-696f815cb5b0"
+      ]
+    }
+  }
+}
