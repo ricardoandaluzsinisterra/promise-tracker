@@ -15,6 +15,7 @@ The TUI is intentionally beginner-friendly:
 Usage:
   python gateway_tui_tester.py
   python gateway_tui_tester.py --all
+    python gateway_tui_tester.py --saga-rollback-test
   python gateway_tui_tester.py --base-url http://localhost:8000
 """
 
@@ -24,8 +25,12 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib import error, request
 
@@ -141,6 +146,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--politician-id", default="1", help="Default politician_id for path params")
     parser.add_argument("--source-id", default="source-001", help="Default source_id for linking sources")
     parser.add_argument("--all", action="store_true", help="Run all endpoint tests once and exit")
+    parser.add_argument(
+        "--saga-rollback-test",
+        action="store_true",
+        help="Run automated saga rollback test that simulates TrackingCreationFailed",
+    )
+    parser.add_argument(
+        "--log-file",
+        default="gateway_saga_logs.txt",
+        help="Log file path for saga rollback test output (default: %(default)s)",
+    )
     return parser.parse_args()
 
 
@@ -173,6 +188,146 @@ def send_request(
     except error.HTTPError as exc:
         response_headers = dict(exc.headers.items()) if exc.headers else {}
         return exc.code, response_headers, exc.read()
+
+
+# AI Prompt :
+# dd a option to test rollbacks and failure to write to database on the tracking service and capture all logs going back in the saga.
+def send_json_request(
+    method: str,
+    url: str,
+    timeout: float,
+    body: dict[str, Any] | None = None,
+) -> tuple[int | None, dict[str, str], Any | None, str]:
+    try:
+        status, headers, raw = send_request(method=method, url=url, timeout=timeout, body=body)
+    except error.URLError as exc:
+        return None, {}, None, f"Request failed: {exc.reason}"
+
+    parsed: Any | None = None
+    decoded = raw.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(decoded)
+    except json.JSONDecodeError:
+        parsed = None
+
+    pretty = decode_response_body(headers, raw)
+    return status, headers, parsed, pretty
+
+
+def run_command(
+    command: list[str],
+    timeout: float,
+    stdin_text: str | None = None,
+) -> tuple[int, str, str]:
+    try:
+        completed = subprocess.run(
+            command,
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return completed.returncode, completed.stdout, completed.stderr
+    except FileNotFoundError:
+        return 127, "", f"Command not found: {command[0]}"
+    except subprocess.TimeoutExpired as exc:
+        def _to_text(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if isinstance(value, memoryview):
+                return value.tobytes().decode("utf-8", errors="replace")
+            if isinstance(value, (bytes, bytearray)):
+                return bytes(value).decode("utf-8", errors="replace")
+            return str(value)
+
+        stdout = _to_text(exc.stdout)
+        stderr = _to_text(exc.stderr)
+        return 124, stdout, f"{stderr}\nCommand timed out after {timeout} seconds".strip()
+
+
+def publish_tracking_creation_failed_event(
+    promise_id: str,
+    politician_id: str,
+    timeout: float,
+) -> tuple[bool, str]:
+    payload = {
+        "event_type": "TrackingCreationFailed",
+        "saga_id": promise_id,
+        "promise_id": promise_id,
+        "politician_id": politician_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    command = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "kafka",
+        "kafka-console-producer",
+        "--bootstrap-server",
+        "kafka:9092",
+        "--topic",
+        "tracking.events",
+    ]
+    return_code, _stdout, stderr = run_command(
+        command=command,
+        timeout=timeout,
+        stdin_text=json.dumps(payload) + "\n",
+    )
+    if return_code != 0:
+        return False, stderr.strip() or "Failed to publish TrackingCreationFailed"
+    return True, "TrackingCreationFailed published to tracking.events"
+
+
+def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[bool, str]:
+    command = [
+        "docker",
+        "compose",
+        "logs",
+        "--no-color",
+        "--tail",
+        "1200",
+        "promises-service",
+        "politicians-service",
+        "trackers-service",
+        "sources-service",
+        "projection-service",
+        "kafka",
+    ]
+    return_code, stdout, stderr = run_command(command=command, timeout=timeout)
+    if return_code != 0:
+        return False, stderr.strip() or "Failed to collect docker compose logs"
+
+    keywords = [
+        promise_id,
+        "PromiseCreated",
+        "PoliticianTagged",
+        "TrackingCreated",
+        "TrackingCreationFailed",
+        "PromiseUntagged",
+        "PoliticianUntaggingFailed",
+        "PromiseRetracted",
+        "TrackingArchiveFailed",
+        "SourcesClearFailed",
+    ]
+    filtered_lines = [
+        line for line in stdout.splitlines() if any(keyword in line for keyword in keywords)
+    ]
+
+    with open(file_path, "w", encoding="utf-8") as log_file:
+        log_file.write("=== FILTERED SAGA LINES ===\n")
+        if filtered_lines:
+            log_file.write("\n".join(filtered_lines))
+            log_file.write("\n")
+        else:
+            log_file.write("<no filtered lines matched promise_id/event keywords>\n")
+        log_file.write("\n=== RAW docker compose logs ===\n")
+        log_file.write(stdout)
+
+    return True, f"Logs saved to {file_path}"
 
 
 def get_header(headers: dict[str, str], name: str, default: str = "") -> str:
@@ -351,6 +506,7 @@ def print_menu(base_url: str, timeout: float, values: dict[str, str]) -> None:
 
     print("-" * 72)
     print("a. Run all endpoint tests")
+    print("r. Run saga rollback test (simulate TrackingCreationFailed)")
     print("s. Settings")
     print("q. Quit")
 
@@ -432,6 +588,184 @@ def run_all(base_url: str, timeout: float, values: dict[str, str]) -> int:
     return 0
 
 
+def run_saga_rollback_test(
+    base_url: str,
+    timeout: float,
+    values: dict[str, str],
+    default_log_file: str,
+    interactive: bool,
+) -> int:
+    print("\nRunning saga rollback + tracking failure simulation...")
+    print("This flow creates data, then publishes TrackingCreationFailed to trigger compensation.")
+
+    if interactive:
+        proceed = input("Continue? [Y/n]: ").strip().lower()
+        if proceed == "n":
+            print("Canceled.")
+            return 0
+
+    log_file = default_log_file
+    if interactive:
+        log_file = prompt_text("Log file path", required=True, default=default_log_file)
+
+    run_suffix = uuid.uuid4().hex[:8]
+    health_url = base_url.rstrip("/") + "/health"
+    health_status, _headers, _payload, health_text = send_json_request(
+        method="GET",
+        url=health_url,
+        timeout=timeout,
+    )
+    if health_status != 200:
+        print(f"Health check failed: {health_status}\n{health_text}")
+        return 1
+
+    politician_body = {
+        "name": f"Saga Tester {run_suffix}",
+        "role": "Governor",
+    }
+    politician_url = base_url.rstrip("/") + "/politicians"
+    p_status, _p_headers, p_payload, p_text = send_json_request(
+        method="POST",
+        url=politician_url,
+        timeout=timeout,
+        body=politician_body,
+    )
+    if p_status not in (200, 201) or not isinstance(p_payload, dict) or "id" not in p_payload:
+        print(f"Failed to create politician: {p_status}\n{p_text}")
+        return 1
+    politician_id = str(p_payload["id"])
+    values["politician_id"] = politician_id
+    print(f"Created politician: {politician_id}")
+
+    promise_body = {
+        "title": f"Saga rollback test {run_suffix}",
+        "description": "TUI rollback simulation for tracking DB write failure handling",
+        "politician_id": politician_id,
+    }
+    promise_url = base_url.rstrip("/") + "/promises"
+    promise_status, _promise_headers, promise_payload, promise_text = send_json_request(
+        method="POST",
+        url=promise_url,
+        timeout=timeout,
+        body=promise_body,
+    )
+    if (
+        promise_status not in (200, 201)
+        or not isinstance(promise_payload, dict)
+        or "id" not in promise_payload
+    ):
+        print(f"Failed to create promise: {promise_status}\n{promise_text}")
+        return 1
+    promise_id = str(promise_payload["id"])
+    values["promise_id"] = promise_id
+    print(f"Created promise: {promise_id}")
+
+    print("Waiting for normal creation saga completion (ACTIVE + tracking created)...")
+    creation_ready = False
+    for attempt in range(1, 31):
+        promise_get_url = base_url.rstrip("/") + f"/promises/{promise_id}"
+        tracking_get_url = base_url.rstrip("/") + f"/tracking/{promise_id}"
+        projection_get_url = base_url.rstrip("/") + f"/query/promises/{promise_id}"
+
+        _ps, _ph, promise_get_payload, _pt = send_json_request(
+            method="GET", url=promise_get_url, timeout=timeout
+        )
+        _ts, _th, tracking_get_payload, _tt = send_json_request(
+            method="GET", url=tracking_get_url, timeout=timeout
+        )
+        _qs, _qh, projection_get_payload, _qt = send_json_request(
+            method="GET", url=projection_get_url, timeout=timeout
+        )
+
+        promise_state = ""
+        if isinstance(promise_get_payload, dict):
+            promise_state = str(promise_get_payload.get("status", "")).lower()
+
+        projection_state = ""
+        if isinstance(projection_get_payload, dict):
+            projection_state = str(projection_get_payload.get("status", ""))
+
+        tracking_exists = isinstance(tracking_get_payload, dict) and bool(
+            tracking_get_payload.get("promise_id")
+        )
+
+        print(
+            f"attempt {attempt}: promise={promise_state or '<missing>'}, "
+            f"tracking_exists={tracking_exists}, projection={projection_state or '<missing>'}"
+        )
+
+        if promise_state == "active" and tracking_exists and projection_state == "ACTIVE":
+            creation_ready = True
+            break
+
+        time.sleep(1)
+
+    if not creation_ready:
+        print("Creation saga did not converge to ACTIVE in time.")
+        print("Proceeding anyway to test rollback/failure branch.")
+
+    published, publish_message = publish_tracking_creation_failed_event(
+        promise_id=promise_id,
+        politician_id=politician_id,
+        timeout=max(timeout, 20),
+    )
+    if not published:
+        print(f"Could not publish TrackingCreationFailed: {publish_message}")
+        return 1
+    print(publish_message)
+
+    print("Waiting for compensation cascade (promise FAILED + projection FAILED)...")
+    rollback_done = False
+    promise_state = ""
+    projection_state = ""
+    for attempt in range(1, 31):
+        promise_get_url = base_url.rstrip("/") + f"/promises/{promise_id}"
+        projection_get_url = base_url.rstrip("/") + f"/query/promises/{promise_id}"
+
+        _ps, _ph, promise_get_payload, _pt = send_json_request(
+            method="GET", url=promise_get_url, timeout=timeout
+        )
+        _qs, _qh, projection_get_payload, _qt = send_json_request(
+            method="GET", url=projection_get_url, timeout=timeout
+        )
+
+        promise_state = ""
+        if isinstance(promise_get_payload, dict):
+            promise_state = str(promise_get_payload.get("status", "")).lower()
+
+        projection_state = ""
+        if isinstance(projection_get_payload, dict):
+            projection_state = str(projection_get_payload.get("status", ""))
+
+        print(
+            f"attempt {attempt}: promise={promise_state or '<missing>'}, "
+            f"projection={projection_state or '<missing>'}"
+        )
+
+        if promise_state == "failed" and projection_state == "FAILED":
+            rollback_done = True
+            break
+
+        time.sleep(1)
+
+    logs_ok, logs_message = capture_saga_logs(
+        promise_id=promise_id,
+        file_path=log_file,
+        timeout=max(timeout, 45),
+    )
+    print(logs_message)
+
+    if not rollback_done:
+        print("Rollback/failure branch did not converge to FAILED in time.")
+        return 1
+
+    if not logs_ok:
+        return 1
+
+    print("Saga rollback test passed.")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
 
@@ -446,6 +780,15 @@ def main() -> int:
     if args.all:
         return run_all(base_url, timeout, values)
 
+    if args.saga_rollback_test:
+        return run_saga_rollback_test(
+            base_url=base_url,
+            timeout=timeout,
+            values=values,
+            default_log_file=args.log_file,
+            interactive=False,
+        )
+
     while True:
         print_menu(base_url, timeout, values)
         choice = input("Select option: ").strip().lower()
@@ -455,6 +798,16 @@ def main() -> int:
 
         if choice == "a":
             run_all(base_url, timeout, values)
+            continue
+
+        if choice == "r":
+            run_saga_rollback_test(
+                base_url=base_url,
+                timeout=timeout,
+                values=values,
+                default_log_file=args.log_file,
+                interactive=True,
+            )
             continue
 
         if choice == "s":
