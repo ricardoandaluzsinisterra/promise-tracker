@@ -16,6 +16,7 @@ Usage:
   python gateway_tui_tester.py
   python gateway_tui_tester.py --all
     python gateway_tui_tester.py --saga-rollback-test
+    python gateway_tui_tester.py --acceptance-suite
   python gateway_tui_tester.py --base-url http://localhost:8000
 """
 
@@ -29,7 +30,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib import error, request
@@ -52,6 +53,34 @@ class Endpoint:
     path_template: str
     body_fields: tuple[BodyField, ...] = ()
     sample_body: dict[str, Any] | None = None
+
+
+@dataclass
+class PollResult:
+    matched: bool
+    attempts: int
+    status: int | None
+    headers: dict[str, str]
+    payload: Any | None
+    text: str
+
+
+@dataclass
+class EvidenceStep:
+    order: int
+    title: str
+    method: str
+    path: str
+    url: str
+    expected: str
+    passed: bool
+    status: int | None
+    request_body: Any | None
+    response_body: Any | None
+    response_text: str
+    notes: str
+    screenshot_file: str | None
+    timestamp_utc: str
 
 
 ENDPOINTS: list[Endpoint] = [
@@ -81,6 +110,13 @@ ENDPOINTS: list[Endpoint] = [
             BodyField("description", "Description", required=False, default=""),
         ),
         sample_body={"title": "Updated promise title"},
+    ),
+    Endpoint(
+        "Retract promise status",
+        "PATCH",
+        "/promises/{promise_id}/status",
+        body_fields=(BodyField("status", "Status", default="retracted"),),
+        sample_body={"status": "retracted"},
     ),
     Endpoint(
         "Create politician",
@@ -127,6 +163,24 @@ ENDPOINTS: list[Endpoint] = [
 ]
 
 PATH_PARAM_PATTERN = re.compile(r"{([^{}]+)}")
+STEP_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+
+
+CREATION_LOG_SEQUENCE_TEMPLATE = [
+    "Outbox poller in Promises Service: Published PromiseCreated for {promise_id}",
+    "Politicians Service consumer: Handled PromiseCreated for {promise_id}",
+    "Outbox poller in Politicians Service: Published PoliticianTagged for {promise_id}",
+    "Trackers Service consumer: Handled PoliticianTagged for {promise_id}",
+    "Outbox poller in Trackers Service: Published TrackingCreated for {promise_id}",
+    "Projection Service consumer: updating summary, status = ACTIVE, promise_id={promise_id}",
+]
+
+FAILURE_LOG_SEQUENCE_TEMPLATE = [
+    "Trackers Service: TrackingCreationFailed emitted for {promise_id}",
+    "Politicians Service consumer: Handled TrackingCreationFailed for {promise_id}, compensating",
+    "Promises Service consumer: Promise {promise_id} marked FAILED after TrackingCreationFailed",
+    "Projection Service consumer: status = FAILED, promise_id={promise_id}",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -155,6 +209,26 @@ def parse_args() -> argparse.Namespace:
         "--log-file",
         default="gateway_saga_logs.txt",
         help="Log file path for saga rollback test output (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--acceptance-suite",
+        action="store_true",
+        help="Run ordered acceptance suite with artifacts and log verification",
+    )
+    parser.add_argument(
+        "--artifacts-dir",
+        default="gateway_acceptance_artifacts",
+        help="Directory for acceptance artifacts (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--evidence-json",
+        default="acceptance_collection.json",
+        help="Acceptance evidence JSON filename or absolute path (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--no-screenshot-prompts",
+        action="store_true",
+        help="Disable manual screenshot prompts in acceptance suite",
     )
     return parser.parse_args()
 
@@ -188,6 +262,175 @@ def send_request(
     except error.HTTPError as exc:
         response_headers = dict(exc.headers.items()) if exc.headers else {}
         return exc.code, response_headers, exc.read()
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def ensure_directory(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def slugify(value: str) -> str:
+    lowered = value.lower().strip()
+    return STEP_SLUG_PATTERN.sub("-", lowered).strip("-")
+
+
+def normalize_status(status_value: Any) -> str:
+    if status_value is None:
+        return ""
+    return str(status_value).strip().upper()
+
+
+def normalize_json(value: Any) -> Any:
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        if isinstance(value, dict):
+            return {str(k): normalize_json(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [normalize_json(v) for v in value]
+        return str(value)
+
+
+def resolve_artifact_path(artifacts_dir: str, path_or_name: str) -> str:
+    if os.path.isabs(path_or_name):
+        return path_or_name
+    return os.path.join(artifacts_dir, path_or_name)
+
+
+def manual_screenshot_checkpoint(
+    order: int,
+    title: str,
+    artifacts_dir: str,
+    enabled: bool,
+) -> str:
+    screenshot_file = f"{order:02d}_{slugify(title)}.png"
+    screenshot_path = os.path.join(artifacts_dir, screenshot_file)
+
+    print("\nScreenshot checkpoint")
+    print(f"Step {order}: {title}")
+    print(f"Save screenshot as: {screenshot_path}")
+    if enabled:
+        input("Capture screenshot now, then press Enter to continue...")
+
+    return screenshot_path
+
+
+def add_evidence_step(
+    collection: list[EvidenceStep],
+    title: str,
+    method: str,
+    path: str,
+    url: str,
+    expected: str,
+    passed: bool,
+    status: int | None,
+    request_body: Any | None,
+    response_body: Any | None,
+    response_text: str,
+    notes: str,
+    artifacts_dir: str,
+    screenshot_prompts: bool,
+) -> None:
+    order = len(collection) + 1
+    screenshot_path = manual_screenshot_checkpoint(
+        order=order,
+        title=title,
+        artifacts_dir=artifacts_dir,
+        enabled=screenshot_prompts,
+    )
+
+    step = EvidenceStep(
+        order=order,
+        title=title,
+        method=method,
+        path=path,
+        url=url,
+        expected=expected,
+        passed=passed,
+        status=status,
+        request_body=normalize_json(request_body),
+        response_body=normalize_json(response_body),
+        response_text=response_text,
+        notes=notes,
+        screenshot_file=screenshot_path,
+        timestamp_utc=utc_now_iso(),
+    )
+    collection.append(step)
+
+    verdict = "PASS" if passed else "FAIL"
+    print(f"[{verdict}] Step {order}: {title}")
+
+
+def request_json(
+    method: str,
+    base_url: str,
+    path: str,
+    timeout: float,
+    body: dict[str, Any] | None = None,
+) -> tuple[int | None, dict[str, str], Any | None, str, str]:
+    url = base_url.rstrip("/") + path
+    status, headers, payload, text = send_json_request(
+        method=method,
+        url=url,
+        timeout=timeout,
+        body=body,
+    )
+    return status, headers, payload, text, url
+
+
+def poll_json_endpoint(
+    method: str,
+    base_url: str,
+    path: str,
+    timeout: float,
+    max_attempts: int,
+    interval_seconds: float,
+    predicate: Any,
+    body: dict[str, Any] | None = None,
+) -> PollResult:
+    latest_status: int | None = None
+    latest_headers: dict[str, str] = {}
+    latest_payload: Any | None = None
+    latest_text = ""
+
+    for attempt in range(1, max_attempts + 1):
+        status, headers, payload, text, _url = request_json(
+            method=method,
+            base_url=base_url,
+            path=path,
+            timeout=timeout,
+            body=body,
+        )
+        latest_status = status
+        latest_headers = headers
+        latest_payload = payload
+        latest_text = text
+
+        if predicate(status, payload):
+            return PollResult(
+                matched=True,
+                attempts=attempt,
+                status=status,
+                headers=headers,
+                payload=payload,
+                text=text,
+            )
+
+        if attempt < max_attempts:
+            time.sleep(interval_seconds)
+
+    return PollResult(
+        matched=False,
+        attempts=max_attempts,
+        status=latest_status,
+        headers=latest_headers,
+        payload=latest_payload,
+        text=latest_text,
+    )
 
 
 # AI Prompt :
@@ -248,6 +491,41 @@ def run_command(
         return 124, stdout, f"{stderr}\nCommand timed out after {timeout} seconds".strip()
 
 
+def break_trackers_database(timeout: float) -> tuple[bool, str]:
+    command = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "postgres-trackers",
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "trackers_db",
+        "-c",
+        "DROP TABLE IF EXISTS tracking_records CASCADE;",
+    ]
+    return_code, stdout, stderr = run_command(command=command, timeout=timeout)
+    if return_code != 0:
+        return False, stderr.strip() or "Failed to drop tracking_records table"
+
+    output = stdout.strip() or "tracking_records table dropped"
+    return True, output
+
+
+def restore_trackers_database(timeout: float) -> tuple[bool, str]:
+    command = ["docker", "compose", "restart", "trackers-service"]
+    return_code, stdout, stderr = run_command(command=command, timeout=timeout)
+    if return_code != 0:
+        return False, stderr.strip() or "Failed to restart trackers-service"
+
+    # The service runs create_all on startup, so restart restores missing tables.
+    time.sleep(6)
+    output = stdout.strip() or "trackers-service restarted"
+    return True, output
+
+
 def publish_tracking_creation_failed_event(
     promise_id: str,
     politician_id: str,
@@ -282,14 +560,14 @@ def publish_tracking_creation_failed_event(
     return True, "TrackingCreationFailed published to tracking.events"
 
 
-def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[bool, str]:
+def fetch_compose_logs(timeout: float, tail: int = 1200) -> tuple[bool, str, str]:
     command = [
         "docker",
         "compose",
         "logs",
         "--no-color",
         "--tail",
-        "1200",
+        str(tail),
         "promises-service",
         "politicians-service",
         "trackers-service",
@@ -299,8 +577,60 @@ def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[
     ]
     return_code, stdout, stderr = run_command(command=command, timeout=timeout)
     if return_code != 0:
-        return False, stderr.strip() or "Failed to collect docker compose logs"
+        return False, stderr.strip() or "Failed to collect docker compose logs", ""
+    return True, "docker compose logs captured", stdout
 
+
+def capture_filtered_logs(
+    file_path: str,
+    timeout: float,
+    keywords: list[str],
+    tail: int = 1200,
+) -> tuple[bool, str, list[str]]:
+    logs_ok, logs_message, raw_logs = fetch_compose_logs(timeout=timeout, tail=tail)
+    if not logs_ok:
+        return False, logs_message, []
+
+    filtered_lines = [
+        line for line in raw_logs.splitlines() if any(keyword in line for keyword in keywords)
+    ]
+
+    with open(file_path, "w", encoding="utf-8") as log_file:
+        log_file.write("=== FILTERED SAGA LINES ===\n")
+        if filtered_lines:
+            log_file.write("\n".join(filtered_lines))
+            log_file.write("\n")
+        else:
+            log_file.write("<no filtered lines matched keywords>\n")
+        log_file.write("\n=== RAW docker compose logs ===\n")
+        log_file.write(raw_logs)
+
+    return True, f"Logs saved to {file_path}", filtered_lines
+
+
+def verify_log_sequence(
+    lines: list[str],
+    expected_sequence: list[str],
+) -> tuple[bool, list[str], list[str]]:
+    missing: list[str] = []
+    matched_lines: list[str] = []
+    scan_start = 0
+
+    for expected_line in expected_sequence:
+        found = False
+        for idx in range(scan_start, len(lines)):
+            if expected_line in lines[idx]:
+                matched_lines.append(lines[idx])
+                scan_start = idx + 1
+                found = True
+                break
+        if not found:
+            missing.append(expected_line)
+
+    return len(missing) == 0, missing, matched_lines
+
+
+def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[bool, str]:
     keywords = [
         promise_id,
         "PromiseCreated",
@@ -313,21 +643,13 @@ def capture_saga_logs(promise_id: str, file_path: str, timeout: float) -> tuple[
         "TrackingArchiveFailed",
         "SourcesClearFailed",
     ]
-    filtered_lines = [
-        line for line in stdout.splitlines() if any(keyword in line for keyword in keywords)
-    ]
-
-    with open(file_path, "w", encoding="utf-8") as log_file:
-        log_file.write("=== FILTERED SAGA LINES ===\n")
-        if filtered_lines:
-            log_file.write("\n".join(filtered_lines))
-            log_file.write("\n")
-        else:
-            log_file.write("<no filtered lines matched promise_id/event keywords>\n")
-        log_file.write("\n=== RAW docker compose logs ===\n")
-        log_file.write(stdout)
-
-    return True, f"Logs saved to {file_path}"
+    ok, message, _filtered_lines = capture_filtered_logs(
+        file_path=file_path,
+        timeout=timeout,
+        keywords=keywords,
+        tail=1200,
+    )
+    return ok, message
 
 
 def get_header(headers: dict[str, str], name: str, default: str = "") -> str:
@@ -448,6 +770,689 @@ def collect_body(endpoint: Endpoint, values: dict[str, str], interactive: bool) 
     return body
 
 
+def export_acceptance_collection(
+    file_path: str,
+    base_url: str,
+    duration_seconds: float,
+    setup_data: dict[str, Any],
+    steps: list[EvidenceStep],
+    log_checks: dict[str, Any],
+) -> tuple[bool, str]:
+    payload = {
+        "generated_at": utc_now_iso(),
+        "base_url": base_url,
+        "duration_seconds": round(duration_seconds, 3),
+        "setup": normalize_json(setup_data),
+        "steps": [normalize_json(asdict(step)) for step in steps],
+        "log_checks": normalize_json(log_checks),
+    }
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as evidence_file:
+            json.dump(payload, evidence_file, indent=2, ensure_ascii=True)
+            evidence_file.write("\n")
+    except OSError as exc:
+        return False, f"Failed to write acceptance evidence JSON: {exc}"
+
+    return True, f"Acceptance evidence JSON saved to {file_path}"
+
+
+def run_acceptance_suite(
+    base_url: str,
+    timeout: float,
+    values: dict[str, str],
+    artifacts_dir: str,
+    evidence_json_name: str,
+    log_file_name: str,
+    screenshot_prompts: bool,
+) -> int:
+    print("\nRunning ordered acceptance suite...")
+    started = time.time()
+
+    ensure_directory(artifacts_dir)
+    evidence_json_path = resolve_artifact_path(artifacts_dir, evidence_json_name)
+    log_file_path = resolve_artifact_path(artifacts_dir, log_file_name)
+
+    setup_data: dict[str, Any] = {
+        "run_suffix": uuid.uuid4().hex[:8],
+        "artifacts_dir": artifacts_dir,
+    }
+    evidence_steps: list[EvidenceStep] = []
+
+    success_promise_id = ""
+    tracker_failure_promise_id = ""
+    creation_log_checks: dict[str, Any] = {}
+    failure_log_checks: dict[str, Any] = {}
+    log_capture_ok = False
+    log_capture_message = ""
+
+    # Setup: create a valid politician for success and retraction scenarios.
+    setup_politician_body = {
+        "name": f"Acceptance Politician {setup_data['run_suffix']}",
+        "role": "Governor",
+    }
+    politician_status, _ph, politician_payload, politician_text, _purl = request_json(
+        method="POST",
+        base_url=base_url,
+        path="/politicians",
+        timeout=timeout,
+        body=setup_politician_body,
+    )
+    politician_id = ""
+    if (
+        politician_status in (200, 201)
+        and isinstance(politician_payload, dict)
+        and "id" in politician_payload
+    ):
+        politician_id = str(politician_payload["id"])
+        values["politician_id"] = politician_id
+        setup_data["valid_politician_id"] = politician_id
+    else:
+        setup_data["setup_error"] = {
+            "message": "Failed to create setup politician",
+            "status": politician_status,
+            "body": normalize_json(politician_payload),
+            "text": politician_text,
+        }
+
+    if not politician_id:
+        duration = time.time() - started
+        export_acceptance_collection(
+            file_path=evidence_json_path,
+            base_url=base_url,
+            duration_seconds=duration,
+            setup_data=setup_data,
+            steps=evidence_steps,
+            log_checks={"capture_ok": False, "message": "setup failed before steps"},
+        )
+        print("Acceptance suite failed during setup.")
+        return 1
+
+    # Step 1
+    step1_title = "POST /promises with a valid politician_id, showing status PENDING"
+    step1_body = {
+        "title": f"Acceptance pending test {setup_data['run_suffix']}",
+        "description": "Acceptance path for initial pending state",
+        "politician_id": politician_id,
+    }
+    step1_status, _s1h, step1_payload, step1_text, step1_url = request_json(
+        method="POST",
+        base_url=base_url,
+        path="/promises",
+        timeout=timeout,
+        body=step1_body,
+    )
+    step1_status_text = ""
+    if isinstance(step1_payload, dict):
+        step1_status_text = str(step1_payload.get("status", ""))
+    if isinstance(step1_payload, dict) and "id" in step1_payload:
+        success_promise_id = str(step1_payload["id"])
+        values["promise_id"] = success_promise_id
+
+    step1_passed = (
+        step1_status in (200, 201)
+        and bool(success_promise_id)
+        and normalize_status(step1_status_text) == "PENDING"
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step1_title,
+        method="POST",
+        path="/promises",
+        url=step1_url,
+        expected="201 response with status PENDING",
+        passed=step1_passed,
+        status=step1_status,
+        request_body=step1_body,
+        response_body=step1_payload,
+        response_text=step1_text,
+        notes=f"promise_id={success_promise_id or '<missing>'}",
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    if not success_promise_id:
+        duration = time.time() - started
+        export_acceptance_collection(
+            file_path=evidence_json_path,
+            base_url=base_url,
+            duration_seconds=duration,
+            setup_data=setup_data,
+            steps=evidence_steps,
+            log_checks={"capture_ok": False, "message": "step 1 failed; no promise_id"},
+        )
+        print("Acceptance suite stopped because step 1 did not produce promise_id.")
+        return 1
+
+    # Step 2
+    step2_title = "GET /query/promises/{id} immediately after, showing status PENDING"
+    step2_path = f"/query/promises/{success_promise_id}"
+    step2_status, _s2h, step2_payload, step2_text, step2_url = request_json(
+        method="GET",
+        base_url=base_url,
+        path=step2_path,
+        timeout=timeout,
+    )
+    immediate_status = step2_status
+    immediate_projection_status = ""
+    if isinstance(step2_payload, dict):
+        immediate_projection_status = str(step2_payload.get("status", ""))
+
+    if not (
+        step2_status == 200
+        and isinstance(step2_payload, dict)
+        and normalize_status(step2_payload.get("status")) == "PENDING"
+    ):
+        poll_result = poll_json_endpoint(
+            method="GET",
+            base_url=base_url,
+            path=step2_path,
+            timeout=timeout,
+            max_attempts=10,
+            interval_seconds=0.5,
+            predicate=lambda status, payload: (
+                status == 200
+                and isinstance(payload, dict)
+                and normalize_status(payload.get("status")) == "PENDING"
+            ),
+        )
+        step2_status = poll_result.status
+        step2_payload = poll_result.payload
+        step2_text = poll_result.text
+        step2_notes = (
+            f"initial_status={immediate_status}, initial_projection_status="
+            f"{immediate_projection_status or '<missing>'}, attempts={poll_result.attempts}"
+        )
+        step2_passed = poll_result.matched
+    else:
+        step2_notes = (
+            f"initial_status={immediate_status}, initial_projection_status="
+            f"{immediate_projection_status or '<missing>'}, attempts=1"
+        )
+        step2_passed = True
+
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step2_title,
+        method="GET",
+        path=step2_path,
+        url=step2_url,
+        expected="200 response with status PENDING",
+        passed=step2_passed,
+        status=step2_status,
+        request_body=None,
+        response_body=step2_payload,
+        response_text=step2_text,
+        notes=step2_notes,
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    # Step 3
+    step3_title = (
+        "GET /query/promises/{id} a moment later, showing status ACTIVE with politician_name"
+    )
+    step3_result = poll_json_endpoint(
+        method="GET",
+        base_url=base_url,
+        path=step2_path,
+        timeout=timeout,
+        max_attempts=45,
+        interval_seconds=1.0,
+        predicate=lambda status, payload: (
+            status == 200
+            and isinstance(payload, dict)
+            and normalize_status(payload.get("status")) == "ACTIVE"
+            and bool(str(payload.get("politician_name", "")).strip())
+        ),
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step3_title,
+        method="GET",
+        path=step2_path,
+        url=step2_url,
+        expected="200 response with status ACTIVE and politician_name populated",
+        passed=step3_result.matched,
+        status=step3_result.status,
+        request_body=None,
+        response_body=step3_result.payload,
+        response_text=step3_result.text,
+        notes=f"attempts={step3_result.attempts}",
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    # Optional setup for stronger source_count verification.
+    source_setup: dict[str, Any] = {}
+    source_status, _src_h, source_payload, source_text, _src_url = request_json(
+        method="POST",
+        base_url=base_url,
+        path="/sources",
+        timeout=timeout,
+        body={
+            "name": f"Acceptance Source {setup_data['run_suffix']}",
+            "url": f"https://example.com/acceptance/{setup_data['run_suffix']}",
+        },
+    )
+    source_id = ""
+    if source_status in (200, 201) and isinstance(source_payload, dict) and "id" in source_payload:
+        source_id = str(source_payload["id"])
+        values["source_id"] = source_id
+        link_status, _lnk_h, link_payload, link_text, _lnk_url = request_json(
+            method="POST",
+            base_url=base_url,
+            path="/sources/link",
+            timeout=timeout,
+            body={"promise_id": success_promise_id, "source_id": source_id},
+        )
+        source_setup = {
+            "create_source_status": source_status,
+            "source_id": source_id,
+            "link_status": link_status,
+            "link_body": normalize_json(link_payload),
+            "link_text": link_text,
+        }
+    else:
+        source_setup = {
+            "create_source_status": source_status,
+            "create_source_body": normalize_json(source_payload),
+            "create_source_text": source_text,
+        }
+    setup_data["source_setup"] = source_setup
+
+    # Step 4
+    step4_title = "PATCH /promises/{id}/status with status retracted, triggering retraction Saga"
+    step4_path = f"/promises/{success_promise_id}/status"
+    step4_body = {"status": "retracted"}
+    step4_status, _s4h, step4_payload, step4_text, step4_url = request_json(
+        method="PATCH",
+        base_url=base_url,
+        path=step4_path,
+        timeout=timeout,
+        body=step4_body,
+    )
+    step4_payload_status = ""
+    if isinstance(step4_payload, dict):
+        step4_payload_status = str(step4_payload.get("status", ""))
+    step4_passed = step4_status in (200, 202) and (
+        not step4_payload_status
+        or normalize_status(step4_payload_status) in {"RETRACTING", "RETRACTED"}
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step4_title,
+        method="PATCH",
+        path=step4_path,
+        url=step4_url,
+        expected="Request accepted and promise status enters retracting flow",
+        passed=step4_passed,
+        status=step4_status,
+        request_body=step4_body,
+        response_body=step4_payload,
+        response_text=step4_text,
+        notes="",
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    # Step 5
+    step5_title = "GET /query/promises/{id} after retraction completes, showing ARCHIVED and source_count 0"
+    step5_result = poll_json_endpoint(
+        method="GET",
+        base_url=base_url,
+        path=step2_path,
+        timeout=timeout,
+        max_attempts=60,
+        interval_seconds=1.0,
+        predicate=lambda status, payload: (
+            status == 200
+            and isinstance(payload, dict)
+            and normalize_status(payload.get("status")) == "ARCHIVED"
+            and int(payload.get("source_count", -1)) == 0
+        ),
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step5_title,
+        method="GET",
+        path=step2_path,
+        url=step2_url,
+        expected="200 response with status ARCHIVED and source_count 0",
+        passed=step5_result.matched,
+        status=step5_result.status,
+        request_body=None,
+        response_body=step5_result.payload,
+        response_text=step5_result.text,
+        notes=f"attempts={step5_result.attempts}",
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    # Step 6
+    step6_title = (
+        "POST /promises with non-existent politician_id, then GET /query/promises/{id} shows FAILED"
+    )
+    invalid_politician_id = f"missing-{uuid.uuid4().hex[:10]}"
+    step6_post_body = {
+        "title": f"Acceptance invalid-politician {setup_data['run_suffix']}",
+        "description": "Compensation path for invalid politician",
+        "politician_id": invalid_politician_id,
+    }
+    step6_post_status, _s6h, step6_post_payload, step6_post_text, step6_post_url = request_json(
+        method="POST",
+        base_url=base_url,
+        path="/promises",
+        timeout=timeout,
+        body=step6_post_body,
+    )
+    invalid_promise_id = ""
+    if isinstance(step6_post_payload, dict) and "id" in step6_post_payload:
+        invalid_promise_id = str(step6_post_payload["id"])
+
+    step6_get_result = PollResult(
+        matched=False,
+        attempts=0,
+        status=None,
+        headers={},
+        payload=None,
+        text="",
+    )
+    if invalid_promise_id:
+        step6_get_result = poll_json_endpoint(
+            method="GET",
+            base_url=base_url,
+            path=f"/query/promises/{invalid_promise_id}",
+            timeout=timeout,
+            max_attempts=60,
+            interval_seconds=1.0,
+            predicate=lambda status, payload: (
+                status == 200
+                and isinstance(payload, dict)
+                and normalize_status(payload.get("status")) == "FAILED"
+            ),
+        )
+
+    step6_passed = (
+        step6_post_status in (200, 201)
+        and bool(invalid_promise_id)
+        and step6_get_result.matched
+    )
+    step6_path = (
+        f"/promises -> /query/promises/{invalid_promise_id}"
+        if invalid_promise_id
+        else "/promises -> /query/promises/{id}"
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step6_title,
+        method="POST -> GET",
+        path=step6_path,
+        url=step6_post_url,
+        expected="Create succeeds, then projection status converges to FAILED",
+        passed=step6_passed,
+        status=step6_get_result.status if invalid_promise_id else step6_post_status,
+        request_body=step6_post_body,
+        response_body={
+            "create": normalize_json(step6_post_payload),
+            "query": normalize_json(step6_get_result.payload),
+        },
+        response_text=(
+            f"create_text={step6_post_text}\nquery_text={step6_get_result.text}"
+        ),
+        notes=(
+            f"invalid_promise_id={invalid_promise_id or '<missing>'}, "
+            f"query_attempts={step6_get_result.attempts}"
+        ),
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    # Step 7
+    step7_title = (
+        "POST /promises with valid politician and broken Trackers DB shows TrackingCreationFailed and FAILED"
+    )
+    step7_setup: dict[str, Any] = {}
+
+    broken_path_politician_id = ""
+    broken_politician_status, _bp_h, broken_politician_payload, broken_politician_text, _bp_url = request_json(
+        method="POST",
+        base_url=base_url,
+        path="/politicians",
+        timeout=timeout,
+        body={"name": f"Broken DB Politician {setup_data['run_suffix']}", "role": "Mayor"},
+    )
+    if (
+        broken_politician_status in (200, 201)
+        and isinstance(broken_politician_payload, dict)
+        and "id" in broken_politician_payload
+    ):
+        broken_path_politician_id = str(broken_politician_payload["id"])
+
+    step7_setup["broken_politician_status"] = broken_politician_status
+    step7_setup["broken_politician_body"] = normalize_json(broken_politician_payload)
+    step7_setup["broken_politician_text"] = broken_politician_text
+
+    db_broken = False
+    db_restore_ok = False
+    db_break_message = ""
+    db_restore_message = ""
+
+    step7_post_status: int | None = None
+    step7_post_payload: Any | None = None
+    step7_post_text = ""
+    step7_post_url = base_url.rstrip("/") + "/promises"
+    step7_query_result = PollResult(
+        matched=False,
+        attempts=0,
+        status=None,
+        headers={},
+        payload=None,
+        text="",
+    )
+
+    if broken_path_politician_id:
+        db_broken, db_break_message = break_trackers_database(timeout=max(timeout, 20))
+        step7_setup["break_trackers_db"] = db_break_message
+
+        try:
+            if db_broken:
+                step7_post_body = {
+                    "title": f"Broken trackers DB {setup_data['run_suffix']}",
+                    "description": "Real tracking DB failure compensation test",
+                    "politician_id": broken_path_politician_id,
+                }
+                (
+                    step7_post_status,
+                    _s7h,
+                    step7_post_payload,
+                    step7_post_text,
+                    step7_post_url,
+                ) = request_json(
+                    method="POST",
+                    base_url=base_url,
+                    path="/promises",
+                    timeout=timeout,
+                    body=step7_post_body,
+                )
+
+                if (
+                    step7_post_status in (200, 201)
+                    and isinstance(step7_post_payload, dict)
+                    and "id" in step7_post_payload
+                ):
+                    tracker_failure_promise_id = str(step7_post_payload["id"])
+                    step7_query_result = poll_json_endpoint(
+                        method="GET",
+                        base_url=base_url,
+                        path=f"/query/promises/{tracker_failure_promise_id}",
+                        timeout=timeout,
+                        max_attempts=60,
+                        interval_seconds=1.0,
+                        predicate=lambda status, payload: (
+                            status == 200
+                            and isinstance(payload, dict)
+                            and normalize_status(payload.get("status")) == "FAILED"
+                        ),
+                    )
+        finally:
+            db_restore_ok, db_restore_message = restore_trackers_database(timeout=max(timeout, 30))
+            step7_setup["restore_trackers_db"] = db_restore_message
+    else:
+        step7_setup["break_trackers_db"] = "skipped: failed to create scenario politician"
+
+    step7_passed = (
+        bool(broken_path_politician_id)
+        and db_broken
+        and step7_post_status in (200, 201)
+        and bool(tracker_failure_promise_id)
+        and step7_query_result.matched
+        and db_restore_ok
+    )
+    step7_path = (
+        f"/promises -> /query/promises/{tracker_failure_promise_id}"
+        if tracker_failure_promise_id
+        else "/promises -> /query/promises/{id}"
+    )
+    add_evidence_step(
+        collection=evidence_steps,
+        title=step7_title,
+        method="POST -> GET",
+        path=step7_path,
+        url=step7_post_url,
+        expected="Trackers write fails, TrackingCreationFailed compensation triggers, projection shows FAILED",
+        passed=step7_passed,
+        status=step7_query_result.status if tracker_failure_promise_id else step7_post_status,
+        request_body={
+            "break_trackers_db": "DROP TABLE tracking_records",
+            "promise_request": normalize_json(step7_post_payload),
+        },
+        response_body={
+            "query": normalize_json(step7_query_result.payload),
+            "db": step7_setup,
+        },
+        response_text=(
+            f"create_text={step7_post_text}\nquery_text={step7_query_result.text}\n"
+            f"db_break={db_break_message}\ndb_restore={db_restore_message}"
+        ),
+        notes=(
+            f"tracker_failure_promise_id={tracker_failure_promise_id or '<missing>'}, "
+            f"query_attempts={step7_query_result.attempts}"
+        ),
+        artifacts_dir=artifacts_dir,
+        screenshot_prompts=screenshot_prompts,
+    )
+
+    setup_data["step7_setup"] = step7_setup
+
+    # Log evidence checks for creation and failure paths.
+    keywords = [
+        success_promise_id,
+        tracker_failure_promise_id,
+        "Outbox poller in Promises Service",
+        "Politicians Service consumer",
+        "Outbox poller in Politicians Service",
+        "Trackers Service consumer",
+        "Outbox poller in Trackers Service",
+        "Projection Service consumer",
+        "TrackingCreationFailed",
+    ]
+    keywords = [keyword for keyword in keywords if keyword]
+
+    if success_promise_id and tracker_failure_promise_id:
+        log_capture_ok, log_capture_message, filtered_lines = capture_filtered_logs(
+            file_path=log_file_path,
+            timeout=max(timeout, 90),
+            keywords=keywords,
+            tail=1800,
+        )
+    else:
+        filtered_lines = []
+        log_capture_ok = False
+        log_capture_message = "Skipped log sequence checks because required promise IDs are missing"
+
+    if log_capture_ok:
+        creation_expected = [
+            item.format(promise_id=success_promise_id) for item in CREATION_LOG_SEQUENCE_TEMPLATE
+        ]
+        failure_expected = [
+            item.format(promise_id=tracker_failure_promise_id)
+            for item in FAILURE_LOG_SEQUENCE_TEMPLATE
+        ]
+
+        creation_ok, creation_missing, creation_matched = verify_log_sequence(
+            lines=filtered_lines,
+            expected_sequence=creation_expected,
+        )
+        failure_ok, failure_missing, failure_matched = verify_log_sequence(
+            lines=filtered_lines,
+            expected_sequence=failure_expected,
+        )
+
+        creation_log_checks = {
+            "passed": creation_ok,
+            "expected": creation_expected,
+            "missing": creation_missing,
+            "matched_lines": creation_matched,
+        }
+        failure_log_checks = {
+            "passed": failure_ok,
+            "expected": failure_expected,
+            "missing": failure_missing,
+            "matched_lines": failure_matched,
+        }
+    else:
+        creation_log_checks = {
+            "passed": False,
+            "expected": [],
+            "missing": ["log capture failed"],
+            "matched_lines": [],
+        }
+        failure_log_checks = {
+            "passed": False,
+            "expected": [],
+            "missing": ["log capture failed"],
+            "matched_lines": [],
+        }
+
+    log_checks = {
+        "capture_ok": log_capture_ok,
+        "capture_message": log_capture_message,
+        "log_file": log_file_path,
+        "creation_sequence": creation_log_checks,
+        "failure_sequence": failure_log_checks,
+    }
+
+    duration = time.time() - started
+    export_ok, export_message = export_acceptance_collection(
+        file_path=evidence_json_path,
+        base_url=base_url,
+        duration_seconds=duration,
+        setup_data=setup_data,
+        steps=evidence_steps,
+        log_checks=log_checks,
+    )
+
+    print(export_message)
+    print(log_capture_message)
+
+    all_steps_passed = all(step.passed for step in evidence_steps)
+    sequence_passed = (
+        log_checks["creation_sequence"]["passed"]
+        and log_checks["failure_sequence"]["passed"]
+    )
+
+    if not export_ok:
+        return 1
+
+    if all_steps_passed and sequence_passed:
+        print("Acceptance suite passed.")
+        return 0
+
+    print("Acceptance suite failed. Check evidence JSON and logs for missing assertions.")
+    return 1
+
+
 
 def run_endpoint(
     endpoint: Endpoint,
@@ -507,6 +1512,7 @@ def print_menu(base_url: str, timeout: float, values: dict[str, str]) -> None:
     print("-" * 72)
     print("a. Run all endpoint tests")
     print("r. Run saga rollback test (simulate TrackingCreationFailed)")
+    print("x. Run acceptance suite (ordered artifacts + log checks)")
     print("s. Settings")
     print("q. Quit")
 
@@ -789,6 +1795,17 @@ def main() -> int:
             interactive=False,
         )
 
+    if args.acceptance_suite:
+        return run_acceptance_suite(
+            base_url=base_url,
+            timeout=timeout,
+            values=values,
+            artifacts_dir=args.artifacts_dir,
+            evidence_json_name=args.evidence_json,
+            log_file_name=args.log_file,
+            screenshot_prompts=not args.no_screenshot_prompts,
+        )
+
     while True:
         print_menu(base_url, timeout, values)
         choice = input("Select option: ").strip().lower()
@@ -807,6 +1824,18 @@ def main() -> int:
                 values=values,
                 default_log_file=args.log_file,
                 interactive=True,
+            )
+            continue
+
+        if choice == "x":
+            run_acceptance_suite(
+                base_url=base_url,
+                timeout=timeout,
+                values=values,
+                artifacts_dir=args.artifacts_dir,
+                evidence_json_name=args.evidence_json,
+                log_file_name=args.log_file,
+                screenshot_prompts=not args.no_screenshot_prompts,
             )
             continue
 

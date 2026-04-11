@@ -49,6 +49,10 @@ async def _poll_and_publish(producer: AIOKafkaProducer):
                 )
                 await database.commit()
                 logger.info(f"Published and marked SENT: {event.event_type} / {event.aggregate_id}")
+                if event.event_type == "PromiseCreated":
+                    logger.info(
+                        f"Outbox poller in Promises Service: Published PromiseCreated for {event.aggregate_id}"
+                    )
 
             except Exception as e:
                 logger.error(f"Failed to publish {event.id}: {e}. Will retry.")

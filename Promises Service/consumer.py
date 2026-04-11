@@ -66,6 +66,9 @@ async def _handle_message(message):
             elif event_type == TRACKING_CREATION_FAILED:
                 await repo.mark_failed(db, promise_id)
                 logger.warning(f"Promise {promise_id} marked FAILED after TrackingCreationFailed")
+                logger.warning(
+                    f"Promises Service consumer: Promise {promise_id} marked FAILED after TrackingCreationFailed"
+                )
 
             elif event_type == TRACKING_ARCHIVE_FAILED:
                 # Retraction saga failed, roll back to ACTIVE

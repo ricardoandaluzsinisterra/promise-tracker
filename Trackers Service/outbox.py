@@ -53,5 +53,13 @@ async def _poll_and_publish(producer: AIOKafkaProducer):
                 logger.info(
                     f"Published and marked SENT: {event.event_type} / {event.aggregate_id}"
                 )
+                if event.event_type == "TrackingCreated":
+                    logger.info(
+                        f"Outbox poller in Trackers Service: Published TrackingCreated for {event.aggregate_id}"
+                    )
+                if event.event_type == "TrackingCreationFailed":
+                    logger.info(
+                        f"Outbox poller in Trackers Service: Published TrackingCreationFailed for {event.aggregate_id}"
+                    )
             except Exception as error:
                 logger.error(f"Failed to publish {event.id}: {error}. Will retry.")

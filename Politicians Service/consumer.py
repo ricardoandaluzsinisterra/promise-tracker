@@ -50,6 +50,9 @@ async def _handle_message(message):
 					politician_id=politician_id,
 				)
 				logger.info(f"Handled PromiseCreated for {promise_id}, queued {emitted}")
+				logger.info(
+					f"Politicians Service consumer: Handled PromiseCreated for {promise_id}"
+				)
 
 			elif event_type == PROMISE_RETRACTED:
 				emitted = await repo.handle_promise_retracted(
@@ -68,6 +71,9 @@ async def _handle_message(message):
 					politician_id=politician_id,
 				)
 				logger.info(f"Handled TrackingCreationFailed for {promise_id}, compensating")
+				logger.info(
+					f"Politicians Service consumer: Handled TrackingCreationFailed for {promise_id}, compensating"
+				)
 
 	except Exception as error:
 		logger.error(f"Error handling message: {error}")

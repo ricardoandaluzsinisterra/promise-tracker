@@ -1,4 +1,5 @@
 import uuid
+import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,9 @@ from events import (
 )
 from models import OutboxEvent, OutboxStatus, TrackingRecord, TrackingStatus
 from schemas import CreateTrackingCommand, UpdateTrackingProgressCommand
+
+
+logger = logging.getLogger(__name__)
 
 
 class TrackingRepository:
@@ -87,20 +91,27 @@ class TrackingRepository:
     ) -> str:
         async with database.begin():
             try:
-                tracking = TrackingRecord(
-                    id=str(uuid.uuid4()),
-                    promise_id=promise_id,
-                    politician_id=politician_id,
-                    progress=0,
-                    status=TrackingStatus.ACTIVE,
-                )
-                database.add(tracking)
+                # Use a savepoint so tracking insert failures can be compensated
+                # with a TrackingCreationFailed outbox message in the same request.
+                async with database.begin_nested():
+                    tracking = TrackingRecord(
+                        id=str(uuid.uuid4()),
+                        promise_id=promise_id,
+                        politician_id=politician_id,
+                        progress=0,
+                        status=TrackingStatus.ACTIVE,
+                    )
+                    database.add(tracking)
+                    await database.flush()
 
                 payload = build_tracking_created_payload(promise_id, politician_id, 0)
                 event_type = TRACKING_CREATED
-            except Exception:
+            except Exception as error:
                 payload = build_tracking_creation_failed_payload(promise_id, politician_id)
                 event_type = TRACKING_CREATION_FAILED
+                logger.error(
+                    f"Trackers Service: TrackingCreationFailed emitted for {promise_id}; reason={error}"
+                )
 
             outbox_event = OutboxEvent(
                 id=str(uuid.uuid4()),
@@ -110,6 +121,7 @@ class TrackingRepository:
                 status=OutboxStatus.PENDING,
             )
             database.add(outbox_event)
+            await database.flush()
             return event_type
 
     async def handle_promise_retracted(

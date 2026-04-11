@@ -77,6 +77,9 @@ class ProjectionRepository:
             summary.politician_name = politician_name
         summary.updated_at = self._utc_now()
         await database.commit()
+        logger.info(
+            f"Projection Service consumer: updating summary, status = ACTIVE, promise_id={promise_id}"
+        )
 
     async def handle_politician_tagging_failed(self, database: AsyncSession, payload: dict):
         promise_id = payload.get("promise_id") or payload.get("saga_id")
@@ -104,6 +107,7 @@ class ProjectionRepository:
         summary.status = PromiseSummaryStatus.FAILED
         summary.updated_at = self._utc_now()
         await database.commit()
+        logger.info(f"Projection Service consumer: status = FAILED, promise_id={promise_id}")
 
     async def handle_politician_untagging_failed(self, database: AsyncSession, payload: dict):
         promise_id = payload.get("promise_id") or payload.get("saga_id")

@@ -53,5 +53,9 @@ async def _poll_and_publish(producer: AIOKafkaProducer):
 				logger.info(
 					f"Published and marked SENT: {event.event_type} / {event.aggregate_id}"
 				)
+				if event.event_type == "PoliticianTagged":
+					logger.info(
+						f"Outbox poller in Politicians Service: Published PoliticianTagged for {event.aggregate_id}"
+					)
 			except Exception as error:
 				logger.error(f"Failed to publish {event.id}: {error}. Will retry.")
