@@ -5,6 +5,7 @@ POLITICIAN_TAGGED = "PoliticianTagged"
 PROMISE_RETRACTED = "PromiseRetracted"
 
 TRACKING_CREATED = "TrackingCreated"
+TRACKING_CREATION_FAILED = "TrackingCreationFailed"
 TRACKING_UPDATED = "TrackingUpdated"
 TRACKING_ARCHIVED = "TrackingArchived"
 TRACKING_ARCHIVE_FAILED = "TrackingArchiveFailed"
@@ -25,6 +26,18 @@ def build_tracking_created_payload(promise_id: str, politician_id: str, progress
             "promise_id": promise_id,
             "politician_id": politician_id,
             "progress": progress,
+            "timestamp": _utc_timestamp(),
+        }
+    )
+
+
+def build_tracking_creation_failed_payload(promise_id: str, politician_id: str) -> str:
+    return json.dumps(
+        {
+            "event_type": TRACKING_CREATION_FAILED,
+            "saga_id": promise_id,
+            "promise_id": promise_id,
+            "politician_id": politician_id,
             "timestamp": _utc_timestamp(),
         }
     )

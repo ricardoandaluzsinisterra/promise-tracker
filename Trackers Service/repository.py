@@ -5,10 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from events import (
     TRACKING_ARCHIVED,
     TRACKING_ARCHIVE_FAILED,
+    TRACKING_CREATION_FAILED,
     TRACKING_CREATED,
     TRACKING_UPDATED,
     build_tracking_archived_payload,
     build_tracking_archive_failed_payload,
+    build_tracking_creation_failed_payload,
     build_tracking_created_payload,
     build_tracking_updated_payload,
 )
@@ -84,30 +86,31 @@ class TrackingRepository:
         politician_id: str,
     ) -> str:
         async with database.begin():
-            tracking = TrackingRecord(
-                id=str(uuid.uuid4()),
-                promise_id=promise_id,
-                politician_id=politician_id,
-                progress=0,
-                status=TrackingStatus.ACTIVE,
-            )
-            database.add(tracking)
+            try:
+                tracking = TrackingRecord(
+                    id=str(uuid.uuid4()),
+                    promise_id=promise_id,
+                    politician_id=politician_id,
+                    progress=0,
+                    status=TrackingStatus.ACTIVE,
+                )
+                database.add(tracking)
 
-            payload = build_tracking_created_payload(
-                promise_id=promise_id,
-                politician_id=politician_id,
-                progress=0,
-            )
+                payload = build_tracking_created_payload(promise_id, politician_id, 0)
+                event_type = TRACKING_CREATED
+            except Exception:
+                payload = build_tracking_creation_failed_payload(promise_id, politician_id)
+                event_type = TRACKING_CREATION_FAILED
+
             outbox_event = OutboxEvent(
                 id=str(uuid.uuid4()),
-                event_type=TRACKING_CREATED,
+                event_type=event_type,
                 aggregate_id=promise_id,
                 payload=payload,
                 status=OutboxStatus.PENDING,
             )
             database.add(outbox_event)
-
-            return TRACKING_CREATED
+            return event_type
 
     async def handle_promise_retracted(
         self,
@@ -122,14 +125,20 @@ class TrackingRepository:
             tracking = result.scalar_one_or_none()
 
             if tracking is not None:
-                tracking.status = TrackingStatus.ARCHIVED
-
-                payload = build_tracking_archived_payload(
-                    promise_id=tracking.promise_id,
-                    politician_id=tracking.politician_id,
-                    progress=tracking.progress,
-                )
-                event_type = TRACKING_ARCHIVED
+                try:
+                    tracking.status = TrackingStatus.ARCHIVED
+                    payload = build_tracking_archived_payload(
+                        promise_id=tracking.promise_id,
+                        politician_id=tracking.politician_id,
+                        progress=tracking.progress,
+                    )
+                    event_type = TRACKING_ARCHIVED
+                except Exception:
+                    payload = build_tracking_archive_failed_payload(
+                        promise_id=promise_id,
+                        politician_id=tracking.politician_id or politician_id_from_event or "",
+                    )
+                    event_type = TRACKING_ARCHIVE_FAILED
             else:
                 payload = build_tracking_archive_failed_payload(
                     promise_id=promise_id,

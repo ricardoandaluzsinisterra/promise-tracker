@@ -19,6 +19,7 @@ POLITICIAN_TAGGED        = "PoliticianTagged"
 POLITICIAN_TAGGING_FAILED = "PoliticianTaggingFailed"
 TRACKING_ARCHIVED        = "TrackingArchived"
 TRACKING_ARCHIVE_FAILED  = "TrackingArchiveFailed"
+TRACKING_CREATION_FAILED = "TrackingCreationFailed"
 
 KAFKA_TOPIC = "promise.events"
 

@@ -94,6 +94,50 @@ class ProjectionRepository:
         summary.updated_at = self._utc_now()
         await database.commit()
 
+    async def handle_tracking_creation_failed(self, database: AsyncSession, payload: dict):
+        promise_id = payload.get("promise_id") or payload.get("saga_id")
+        if not promise_id:
+            return
+        summary = await self.get_summary(database, promise_id)
+        if summary is None:
+            return
+        summary.status = PromiseSummaryStatus.FAILED
+        summary.updated_at = self._utc_now()
+        await database.commit()
+
+    async def handle_politician_untagging_failed(self, database: AsyncSession, payload: dict):
+        promise_id = payload.get("promise_id") or payload.get("saga_id")
+        if not promise_id:
+            return
+        summary = await self.get_summary(database, promise_id)
+        if summary is None:
+            return
+        summary.status = PromiseSummaryStatus.FAILED
+        summary.updated_at = self._utc_now()
+        await database.commit()
+
+    async def handle_sources_clear_failed(self, database: AsyncSession, payload: dict):
+        promise_id = payload.get("promise_id") or payload.get("saga_id")
+        if not promise_id:
+            return
+        summary = await self.get_summary(database, promise_id)
+        if summary is None:
+            return
+        summary.status = PromiseSummaryStatus.FAILED
+        summary.updated_at = self._utc_now()
+        await database.commit()
+
+    async def handle_tracking_archive_failed(self, database: AsyncSession, payload: dict):
+        promise_id = payload.get("promise_id") or payload.get("saga_id")
+        if not promise_id:
+            return
+        summary = await self.get_summary(database, promise_id)
+        if summary is None:
+            return
+        summary.status = PromiseSummaryStatus.ACTIVE  # retraction rolled back, promise is still live
+        summary.updated_at = self._utc_now()
+        await database.commit()
+
     async def handle_tracking_updated(self, database: AsyncSession, payload: dict):
         promise_id = payload.get("promise_id") or payload.get("saga_id")
         if not promise_id:

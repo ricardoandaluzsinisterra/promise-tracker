@@ -14,7 +14,12 @@ import logging
 from aiokafka import AIOKafkaConsumer
 from database import AsyncSessionFactory
 from repository import PromiseRepository
-from events import POLITICIAN_TAGGED, POLITICIAN_TAGGING_FAILED, TRACKING_ARCHIVE_FAILED
+from events import (
+    POLITICIAN_TAGGED,
+    POLITICIAN_TAGGING_FAILED,
+    TRACKING_ARCHIVE_FAILED,
+    TRACKING_CREATION_FAILED,
+)
 
 logger = logging.getLogger(__name__)
 repo = PromiseRepository()
@@ -57,6 +62,10 @@ async def _handle_message(message):
                 # Downstream failed, compensate by marking promise FAILED
                 await repo.mark_failed(db, promise_id)
                 logger.warning(f"Promise {promise_id} marked FAILED after PoliticianTaggingFailed")
+
+            elif event_type == TRACKING_CREATION_FAILED:
+                await repo.mark_failed(db, promise_id)
+                logger.warning(f"Promise {promise_id} marked FAILED after TrackingCreationFailed")
 
             elif event_type == TRACKING_ARCHIVE_FAILED:
                 # Retraction saga failed, roll back to ACTIVE

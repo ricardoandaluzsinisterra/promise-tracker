@@ -3,17 +3,19 @@ import logging
 from aiokafka import AIOKafkaConsumer
 
 from database import AsyncSessionFactory
-from events import CONSUMED_TOPIC, PROMISE_CREATED, PROMISE_RETRACTED
+from events import PROMISE_CREATED, PROMISE_RETRACTED, TRACKING_CREATION_FAILED
 from repository import PoliticianRepository
 
 
 logger = logging.getLogger(__name__)
 repo = PoliticianRepository()
 
+CONSUMED_TOPICS = ["promise.events", "tracking.events"]
+
 
 async def run_event_consumer(kafka_broker: str):
 	consumer = AIOKafkaConsumer(
-		CONSUMED_TOPIC,
+		*CONSUMED_TOPICS,
 		bootstrap_servers=kafka_broker,
 		group_id="politicians-service-group",
 		auto_offset_reset="earliest",
@@ -56,6 +58,16 @@ async def _handle_message(message):
 					politician_id_from_event=politician_id,
 				)
 				logger.info(f"Handled PromiseRetracted for {promise_id}, queued {emitted}")
+
+			elif event_type == TRACKING_CREATION_FAILED:
+				if not politician_id:
+					return
+				await repo.handle_tracking_creation_failed(
+					database=database,
+					promise_id=promise_id,
+					politician_id=politician_id,
+				)
+				logger.info(f"Handled TrackingCreationFailed for {promise_id}, compensating")
 
 	except Exception as error:
 		logger.error(f"Error handling message: {error}")

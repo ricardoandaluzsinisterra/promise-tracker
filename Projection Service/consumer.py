@@ -7,9 +7,13 @@ from events import (
     CONSUMED_TOPICS,
     POLITICIAN_TAGGED,
     POLITICIAN_TAGGING_FAILED,
+    POLITICIAN_UNTAGGING_FAILED,
     PROMISE_CREATED,
     SOURCE_LINKED,
+    SOURCES_CLEAR_FAILED,
     SOURCES_CLEARED,
+    TRACKING_ARCHIVE_FAILED,
+    TRACKING_CREATION_FAILED,
     TRACKING_ARCHIVED,
     TRACKING_UPDATED,
 )
@@ -49,6 +53,14 @@ async def _handle_message(message):
                 await repo.handle_politician_tagged(database, payload)
             elif event_type == POLITICIAN_TAGGING_FAILED:
                 await repo.handle_politician_tagging_failed(database, payload)
+            elif event_type == TRACKING_CREATION_FAILED:
+                await repo.handle_tracking_creation_failed(database, payload)
+            elif event_type == TRACKING_ARCHIVE_FAILED:
+                await repo.handle_tracking_archive_failed(database, payload)
+            elif event_type == POLITICIAN_UNTAGGING_FAILED:
+                await repo.handle_politician_untagging_failed(database, payload)
+            elif event_type == SOURCES_CLEAR_FAILED:
+                await repo.handle_sources_clear_failed(database, payload)
             elif event_type == TRACKING_UPDATED:
                 await repo.handle_tracking_updated(database, payload)
             elif event_type == TRACKING_ARCHIVED:

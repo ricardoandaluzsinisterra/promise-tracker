@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from events import (
     SOURCE_LINKED,
     SOURCES_CLEARED,
+    SOURCES_CLEAR_FAILED,
     build_source_linked_payload,
+    build_sources_clear_failed_payload,
     build_sources_cleared_payload,
 )
 from models import OutboxEvent, OutboxStatus, PromiseSource, Source
@@ -67,22 +69,27 @@ class SourceRepository:
 
     async def clear_sources_for_promise(self, database: AsyncSession, promise_id: str) -> str:
         async with database.begin():
-            result = await database.execute(
-                select(PromiseSource).where(PromiseSource.promise_id == promise_id)
-            )
-            linked_rows = result.scalars().all()
+            try:
+                result = await database.execute(
+                    select(PromiseSource).where(PromiseSource.promise_id == promise_id)
+                )
+                linked_rows = result.scalars().all()
 
-            for linked_row in linked_rows:
-                await database.delete(linked_row)
+                for linked_row in linked_rows:
+                    await database.delete(linked_row)
 
-            payload = build_sources_cleared_payload(promise_id=promise_id)
+                payload = build_sources_cleared_payload(promise_id=promise_id)
+                event_type = SOURCES_CLEARED
+            except Exception:
+                payload = build_sources_clear_failed_payload(promise_id=promise_id)
+                event_type = SOURCES_CLEAR_FAILED
+
             outbox_event = OutboxEvent(
                 id=str(uuid.uuid4()),
-                event_type=SOURCES_CLEARED,
+                event_type=event_type,
                 aggregate_id=promise_id,
                 payload=payload,
                 status=OutboxStatus.PENDING,
             )
             database.add(outbox_event)
-
-            return SOURCES_CLEARED
+            return event_type

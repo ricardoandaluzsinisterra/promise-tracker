@@ -3,10 +3,12 @@ from datetime import datetime, timezone
 
 PROMISE_CREATED = "PromiseCreated"
 PROMISE_RETRACTED = "PromiseRetracted"
+TRACKING_CREATION_FAILED = "TrackingCreationFailed"
 
 POLITICIAN_TAGGED = "PoliticianTagged"
 POLITICIAN_TAGGING_FAILED = "PoliticianTaggingFailed"
 PROMISE_UNTAGGED = "PromiseUntagged"
+POLITICIAN_UNTAGGING_FAILED = "PoliticianUntaggingFailed"
 
 KAFKA_TOPIC = "politician.events"
 CONSUMED_TOPIC = "promise.events"
@@ -44,6 +46,18 @@ def build_promise_untagged_payload(promise_id: str, politician_id: str) -> str:
 	return json.dumps(
 		{
 			"event_type": PROMISE_UNTAGGED,
+			"saga_id": promise_id,
+			"promise_id": promise_id,
+			"politician_id": politician_id,
+			"timestamp": _utc_timestamp(),
+		}
+	)
+
+
+def build_politician_untagging_failed_payload(promise_id: str, politician_id: str) -> str:
+	return json.dumps(
+		{
+			"event_type": POLITICIAN_UNTAGGING_FAILED,
 			"saga_id": promise_id,
 			"promise_id": promise_id,
 			"politician_id": politician_id,

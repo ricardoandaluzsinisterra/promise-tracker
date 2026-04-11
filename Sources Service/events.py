@@ -6,6 +6,7 @@ TRACKING_ARCHIVED = "TrackingArchived"
 
 SOURCE_LINKED = "SourceLinked"
 SOURCES_CLEARED = "SourcesCleared"
+SOURCES_CLEAR_FAILED = "SourcesClearFailed"
 
 KAFKA_TOPIC = "source.events"
 CONSUMED_TOPIC = "tracking.events"
@@ -31,6 +32,17 @@ def build_sources_cleared_payload(promise_id: str) -> str:
     return json.dumps(
         {
             "event_type": SOURCES_CLEARED,
+            "saga_id": promise_id,
+            "promise_id": promise_id,
+            "timestamp": _utc_timestamp(),
+        }
+    )
+
+
+def build_sources_clear_failed_payload(promise_id: str) -> str:
+    return json.dumps(
+        {
+            "event_type": SOURCES_CLEAR_FAILED,
             "saga_id": promise_id,
             "promise_id": promise_id,
             "timestamp": _utc_timestamp(),
