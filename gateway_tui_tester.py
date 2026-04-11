@@ -180,6 +180,13 @@ FAILURE_LOG_SEQUENCE_TEMPLATE = [
     "Projection Service consumer: status = FAILED, promise_id={promise_id}",
 ]
 
+ACCEPTANCE_POLL_INTERVAL_SECONDS = 0.5
+ACCEPTANCE_STEP2_MAX_ATTEMPTS = 12
+ACCEPTANCE_STEP3_MAX_ATTEMPTS = 20
+ACCEPTANCE_STEP5_MAX_ATTEMPTS = 24
+ACCEPTANCE_STEP6_MAX_ATTEMPTS = 20
+ACCEPTANCE_STEP7_MAX_ATTEMPTS = 20
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive API Gateway endpoint tester")
@@ -976,8 +983,8 @@ def run_acceptance_suite(
             base_url=base_url,
             path=step2_path,
             timeout=timeout,
-            max_attempts=10,
-            interval_seconds=0.5,
+            max_attempts=ACCEPTANCE_STEP2_MAX_ATTEMPTS,
+            interval_seconds=ACCEPTANCE_POLL_INTERVAL_SECONDS,
             predicate=lambda status, payload: (
                 status == 200
                 and isinstance(payload, dict)
@@ -1023,8 +1030,8 @@ def run_acceptance_suite(
         base_url=base_url,
         path=step2_path,
         timeout=timeout,
-        max_attempts=45,
-        interval_seconds=1.0,
+        max_attempts=ACCEPTANCE_STEP3_MAX_ATTEMPTS,
+        interval_seconds=ACCEPTANCE_POLL_INTERVAL_SECONDS,
         predicate=lambda status, payload: (
             status == 200
             and isinstance(payload, dict)
@@ -1120,20 +1127,33 @@ def run_acceptance_suite(
 
     # Step 5
     step5_title = "GET /query/promises/{id} after retraction completes, showing ARCHIVED and source_count 0"
-    step5_result = poll_json_endpoint(
-        method="GET",
-        base_url=base_url,
-        path=step2_path,
-        timeout=timeout,
-        max_attempts=60,
-        interval_seconds=1.0,
-        predicate=lambda status, payload: (
-            status == 200
-            and isinstance(payload, dict)
-            and normalize_status(payload.get("status")) == "ARCHIVED"
-            and int(payload.get("source_count", -1)) == 0
-        ),
-    )
+    if step4_passed:
+        step5_result = poll_json_endpoint(
+            method="GET",
+            base_url=base_url,
+            path=step2_path,
+            timeout=timeout,
+            max_attempts=ACCEPTANCE_STEP5_MAX_ATTEMPTS,
+            interval_seconds=ACCEPTANCE_POLL_INTERVAL_SECONDS,
+            predicate=lambda status, payload: (
+                status == 200
+                and isinstance(payload, dict)
+                and normalize_status(payload.get("status")) == "ARCHIVED"
+                and int(payload.get("source_count", -1)) == 0
+            ),
+        )
+        step5_notes = f"attempts={step5_result.attempts}"
+    else:
+        step5_result = PollResult(
+            matched=False,
+            attempts=0,
+            status=step4_status,
+            headers={},
+            payload=None,
+            text="Skipped because step 4 did not trigger retraction successfully",
+        )
+        step5_notes = "skipped: step 4 failed"
+
     add_evidence_step(
         collection=evidence_steps,
         title=step5_title,
@@ -1146,7 +1166,7 @@ def run_acceptance_suite(
         request_body=None,
         response_body=step5_result.payload,
         response_text=step5_result.text,
-        notes=f"attempts={step5_result.attempts}",
+        notes=step5_notes,
     )
 
     # Step 6
@@ -1184,8 +1204,8 @@ def run_acceptance_suite(
             base_url=base_url,
             path=f"/query/promises/{invalid_promise_id}",
             timeout=timeout,
-            max_attempts=60,
-            interval_seconds=1.0,
+            max_attempts=ACCEPTANCE_STEP6_MAX_ATTEMPTS,
+            interval_seconds=ACCEPTANCE_POLL_INTERVAL_SECONDS,
             predicate=lambda status, payload: (
                 status == 200
                 and isinstance(payload, dict)
@@ -1306,8 +1326,8 @@ def run_acceptance_suite(
                         base_url=base_url,
                         path=f"/query/promises/{tracker_failure_promise_id}",
                         timeout=timeout,
-                        max_attempts=60,
-                        interval_seconds=1.0,
+                        max_attempts=ACCEPTANCE_STEP7_MAX_ATTEMPTS,
+                        interval_seconds=ACCEPTANCE_POLL_INTERVAL_SECONDS,
                         predicate=lambda status, payload: (
                             status == 200
                             and isinstance(payload, dict)

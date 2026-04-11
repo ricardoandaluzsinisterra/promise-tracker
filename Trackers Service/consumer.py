@@ -1,31 +1,44 @@
+import asyncio
 import json
 import logging
 from aiokafka import AIOKafkaConsumer
 
 from database import AsyncSessionFactory
-from events import POLITICIAN_TAGGED, PROMISE_RETRACTED, CONSUMED_TOPIC
+from events import POLITICIAN_TAGGED, PROMISE_RETRACTED, PROMISE_UNTAGGED, CONSUMED_TOPIC
 from repository import TrackingRepository
 
 
 logger = logging.getLogger(__name__)
 repo = TrackingRepository()
+RETRY_DELAY_SECONDS = 3
 
 
 async def run_event_consumer(kafka_broker: str):
-    consumer = AIOKafkaConsumer(
-        CONSUMED_TOPIC,
-        bootstrap_servers=kafka_broker,
-        group_id="trackers-service-group",
-        auto_offset_reset="earliest",
-    )
-    await consumer.start()
-    logger.info("Event consumer started.")
+    while True:
+        consumer = AIOKafkaConsumer(
+            CONSUMED_TOPIC,
+            bootstrap_servers=kafka_broker,
+            group_id="trackers-service-group",
+            auto_offset_reset="earliest",
+        )
+        try:
+            await consumer.start()
+            logger.info("Event consumer started.")
 
-    try:
-        async for message in consumer:
-            await _handle_message(message)
-    finally:
-        await consumer.stop()
+            async for message in consumer:
+                await _handle_message(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.error(
+                f"Event consumer connection failed: {error}. Retrying in {RETRY_DELAY_SECONDS}s"
+            )
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+        finally:
+            try:
+                await consumer.stop()
+            except Exception:
+                pass
 
 
 async def _handle_message(message):
@@ -53,12 +66,14 @@ async def _handle_message(message):
                     f"Trackers Service consumer: Handled PoliticianTagged for {promise_id}"
                 )
 
-            elif event_type == PROMISE_RETRACTED:
+            elif event_type in (PROMISE_RETRACTED, PROMISE_UNTAGGED):
                 emitted = await repo.handle_promise_retracted(
                     database=database,
                     promise_id=promise_id,
                     politician_id_from_event=politician_id,
                 )
-                logger.info(f"Handled PromiseRetracted for {promise_id}, queued {emitted}")
+                logger.info(
+                    f"Handled {event_type} for {promise_id}, queued {emitted}"
+                )
     except Exception as error:
         logger.error(f"Error handling message: {error}")

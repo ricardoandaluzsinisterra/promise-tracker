@@ -10,20 +10,32 @@ from models import OutboxEvent, OutboxStatus
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 2
+RETRY_DELAY_SECONDS = 3
 
 
 async def run_outbox_poller(kafka_broker: str):
-    producer = AIOKafkaProducer(bootstrap_servers=kafka_broker)
-    await producer.start()
-    logger.info("Outbox poller started.")
+    while True:
+        producer = AIOKafkaProducer(bootstrap_servers=kafka_broker)
+        try:
+            await producer.start()
+            logger.info("Outbox poller started.")
 
-    try:
-        while True:
-            await _poll_and_publish(producer)
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    finally:
-        await producer.stop()
-        logger.info("Outbox poller stopped.")
+            while True:
+                await _poll_and_publish(producer)
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.error(
+                f"Outbox poller connection failed: {error}. Retrying in {RETRY_DELAY_SECONDS}s"
+            )
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+        finally:
+            try:
+                await producer.stop()
+            except Exception:
+                pass
+            logger.info("Outbox poller stopped.")
 
 
 async def _poll_and_publish(producer: AIOKafkaProducer):

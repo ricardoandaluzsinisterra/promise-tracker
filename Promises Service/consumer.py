@@ -9,6 +9,7 @@ Could you write a kafka consumer that has the following:
 
 This consumer will consume messages from the saga, either coming from the politician service or the tracking service.
 '''
+import asyncio
 import json
 import logging
 from aiokafka import AIOKafkaConsumer
@@ -26,22 +27,34 @@ repo = PromiseRepository()
 
 # These are the topics this service listens to for saga outcomes
 CONSUMED_TOPICS = ["politician.events", "tracking.events"]
+RETRY_DELAY_SECONDS = 3
 
 async def run_event_consumer(kafka_broker: str):
-    consumer = AIOKafkaConsumer(
-        *CONSUMED_TOPICS,
-        bootstrap_servers=kafka_broker,
-        group_id="promises-service-group",  # consumer group ensures each message is processed once per group
-        auto_offset_reset="earliest"
-    )
-    await consumer.start()
-    logger.info("Event consumer started.")
+    while True:
+        consumer = AIOKafkaConsumer(
+            *CONSUMED_TOPICS,
+            bootstrap_servers=kafka_broker,
+            group_id="promises-service-group",  # consumer group ensures each message is processed once per group
+            auto_offset_reset="earliest"
+        )
+        try:
+            await consumer.start()
+            logger.info("Event consumer started.")
 
-    try:
-        async for message in consumer:
-            await _handle_message(message)
-    finally:
-        await consumer.stop()
+            async for message in consumer:
+                await _handle_message(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.error(
+                f"Event consumer connection failed: {error}. Retrying in {RETRY_DELAY_SECONDS}s"
+            )
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+        finally:
+            try:
+                await consumer.stop()
+            except Exception:
+                pass
 
 async def _handle_message(message):
     try:

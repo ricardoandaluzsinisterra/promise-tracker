@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from aiokafka import AIOKafkaConsumer
@@ -22,23 +23,35 @@ from repository import ProjectionRepository
 
 logger = logging.getLogger(__name__)
 repo = ProjectionRepository()
+RETRY_DELAY_SECONDS = 3
 
 
 async def run_event_consumer(kafka_broker: str):
-    consumer = AIOKafkaConsumer(
-        bootstrap_servers=kafka_broker,
-        group_id="projection-service-group",
-        auto_offset_reset="earliest",
-    )
-    consumer.subscribe(topics=CONSUMED_TOPICS)
-    await consumer.start()
-    logger.info("Event consumer started.")
+    while True:
+        consumer = AIOKafkaConsumer(
+            bootstrap_servers=kafka_broker,
+            group_id="projection-service-group",
+            auto_offset_reset="earliest",
+        )
+        consumer.subscribe(topics=CONSUMED_TOPICS)
+        try:
+            await consumer.start()
+            logger.info("Event consumer started.")
 
-    try:
-        async for message in consumer:
-            await _handle_message(message)
-    finally:
-        await consumer.stop()
+            async for message in consumer:
+                await _handle_message(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.error(
+                f"Event consumer connection failed: {error}. Retrying in {RETRY_DELAY_SECONDS}s"
+            )
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+        finally:
+            try:
+                await consumer.stop()
+            except Exception:
+                pass
 
 
 async def _handle_message(message):

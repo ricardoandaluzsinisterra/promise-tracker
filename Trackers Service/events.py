@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 POLITICIAN_TAGGED = "PoliticianTagged"
 PROMISE_RETRACTED = "PromiseRetracted"
+PROMISE_UNTAGGED = "PromiseUntagged"
 
 TRACKING_CREATED = "TrackingCreated"
 TRACKING_CREATION_FAILED = "TrackingCreationFailed"
