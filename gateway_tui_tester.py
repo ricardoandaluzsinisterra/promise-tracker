@@ -191,7 +191,7 @@ def send_request(
 
 
 # AI Prompt :
-# dd a option to test rollbacks and failure to write to database on the tracking service and capture all logs going back in the saga.
+# Add a option to test rollbacks and failure to write to database on the tracking service and capture all logs going back in the saga.
 def send_json_request(
     method: str,
     url: str,
