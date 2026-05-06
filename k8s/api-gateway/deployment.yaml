@@ -14,6 +14,19 @@ spec:
         app: api-gateway
         version: v1
     spec:
+      initContainers:
+        - name: wait-for-backends
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z promises-service 8000; do echo "waiting for promises-service"; sleep 2; done
+              until nc -z politicians-service 8000; do echo "waiting for politicians-service"; sleep 2; done
+              until nc -z trackers-service 8000; do echo "waiting for trackers-service"; sleep 2; done
+              until nc -z sources-service 8000; do echo "waiting for sources-service"; sleep 2; done
+              until nc -z projection-service 8000; do echo "waiting for projection-service"; sleep 2; done
       containers:
         - name: api-gateway
           image: api-gateway:latest

@@ -14,6 +14,16 @@ spec:
         app: sources-service
         version: v1
     spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres-sources 5432; do echo "waiting for postgres-sources"; sleep 2; done
+              until nc -z kafka 9092; do echo "waiting for kafka"; sleep 2; done
       containers:
         - name: sources-service
           image: sources-service:latest
