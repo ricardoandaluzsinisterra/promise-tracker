@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-trackers-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+***
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-trackers
+  namespace: default
+spec:
+  serviceName: postgres-trackers
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-trackers
+  template:
+    metadata:
+      labels:
+        app: postgres-trackers
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "trackers_db"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-trackers-pvc
+***
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-trackers
+  namespace: default
+spec:
+  selector:
+    app: postgres-trackers
+  ports:
+    - port: 5432
+      targetPort: 5432

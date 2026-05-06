@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promises-service
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: promises-service
+  template:
+    metadata:
+      labels:
+        app: promises-service
+        version: v1
+    spec:
+      containers:
+        - name: promises-service
+          image: promises-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KAFKA_BROKER
+              value: "kafka:9092"

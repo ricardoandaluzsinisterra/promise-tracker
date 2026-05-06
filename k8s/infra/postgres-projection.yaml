@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-projection-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+***
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-projection
+  namespace: default
+spec:
+  serviceName: postgres-projection
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-projection
+  template:
+    metadata:
+      labels:
+        app: postgres-projection
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "projection_db"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-projection-pvc
+***
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-projection
+  namespace: default
+spec:
+  selector:
+    app: postgres-projection
+  ports:
+    - port: 5432
+      targetPort: 5432

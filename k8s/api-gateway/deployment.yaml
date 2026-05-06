@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+    spec:
+      containers:
+        - name: api-gateway
+          image: api-gateway:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PROMISES_SERVICE_URL
+              value: "http://promises-service:8000"
+            - name: POLITICIANS_SERVICE_URL
+              value: "http://politicians-service:8000"
+            - name: TRACKERS_SERVICE_URL
+              value: "http://trackers-service:8000"
+            - name: SOURCES_SERVICE_URL
+              value: "http://sources-service:8000"
+            - name: PROJECTION_SERVICE_URL
+              value: "http://projection-service:8000"

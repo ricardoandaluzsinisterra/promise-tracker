@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - promises-service/deployment.yaml
+  - promises-service/service.yaml
+  - politicians-service/deployment.yaml
+  - politicians-service/service.yaml
+  - sources-service/deployment.yaml
+  - sources-service/service.yaml
+  - trackers-service/deployment.yaml
+  - trackers-service/service.yaml
+  - projection-service/deployment.yaml
+  - projection-service/service.yaml
+  - api-gateway/deployment.yaml
+  - api-gateway/service.yaml
+  - infra/postgres-promises.yaml
+  - infra/postgres-politicians.yaml
+  - infra/postgres-trackers.yaml
+  - infra/postgres-sources.yaml
+  - infra/postgres-projection.yaml
+  - infra/zookeeper.yaml
+  - infra/kafka.yaml

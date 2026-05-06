@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-sources-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+***
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-sources
+  namespace: default
+spec:
+  serviceName: postgres-sources
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-sources
+  template:
+    metadata:
+      labels:
+        app: postgres-sources
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "sources_db"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-sources-pvc
+***
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-sources
+  namespace: default
+spec:
+  selector:
+    app: postgres-sources
+  ports:
+    - port: 5432
+      targetPort: 5432

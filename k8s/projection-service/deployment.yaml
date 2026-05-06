@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: projection-service
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: projection-service
+  template:
+    metadata:
+      labels:
+        app: projection-service
+        version: v1
+    spec:
+      containers:
+        - name: projection-service
+          image: projection-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KAFKA_BROKER
+              value: "kafka:9092"
