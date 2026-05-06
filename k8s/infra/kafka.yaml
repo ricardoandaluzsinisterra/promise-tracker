@@ -26,29 +26,39 @@ spec:
       labels:
         app: kafka
     spec:
+      securityContext:
+        runAsUser: 0
+        fsGroup: 0
+      initContainers:
+        - name: wait-for-zookeeper
+          image: alpine:3.18
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true
+              until nc -z -w 2 zookeeper 2181 >/dev/null 2>&1; do echo "waiting for zookeeper"; sleep 2; done
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:7.4.0
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 9092
           env:
             - name: KAFKA_BROKER_ID
               value: "1"
             - name: KAFKA_ZOOKEEPER_CONNECT
               value: "zookeeper:2181"
             - name: KAFKA_LISTENERS
-              value: "PLAINTEXT://0.0.0.0:9092"
+              value: "PLAINTEXT://:9092"
             - name: KAFKA_ADVERTISED_LISTENERS
               value: "PLAINTEXT://kafka:9092"
+            - name: KAFKA_PORT
+              value: ""
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-              value: "1"
-            - name: CONFLUENT_SUPPORT_METRICS_ENABLE
-              value: "false"
+          ports:
+            - containerPort: 9092
+              name: kafka-port
           volumeMounts:
             - name: data
               mountPath: /var/lib/kafka/data
@@ -56,6 +66,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: kafka-pvc
+  updateStrategy:
+    type: RollingUpdate
 ---
 apiVersion: v1
 kind: Service
@@ -67,4 +79,5 @@ spec:
     app: kafka
   ports:
     - port: 9092
-      targetPort: 9092
+      targetPort: kafka-port
+      protocol: TCP
