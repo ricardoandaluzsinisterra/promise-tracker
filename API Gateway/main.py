@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from tracing import forward_headers
 
 PROMISES_SERVICE_URL = os.getenv("PROMISES_SERVICE_URL", "http://promises-service:8001")
 POLITICIANS_SERVICE_URL = os.getenv("POLITICIANS_SERVICE_URL", "http://politicians-service:8002")
@@ -30,7 +31,7 @@ async def proxy_request(request: Request, method: str, base_url: str, path: str)
 	downstream_response = await client.request(
 		method=method,
 		url=f"{base_url}{path}",
-		headers=dict(request.headers),
+		headers=forward_headers(request),
 		params=request.query_params,
 		content=body,
 	)
