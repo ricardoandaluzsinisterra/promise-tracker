@@ -20,4 +20,11 @@ def forward_headers(request: Request) -> dict:
         val = request.headers.get(name)
         if val is not None:
             headers[name] = val
+    # Forward Content-Type and Accept so downstream services can correctly parse bodies
+    content_type = request.headers.get("content-type")
+    if content_type is not None:
+        headers["content-type"] = content_type
+    accept = request.headers.get("accept")
+    if accept is not None:
+        headers["accept"] = accept
     return headers

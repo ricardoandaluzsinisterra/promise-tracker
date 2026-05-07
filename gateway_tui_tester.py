@@ -251,8 +251,33 @@ def send_request(
 
     payload_bytes = None
     if body is not None:
-        payload_bytes = json.dumps(body).encode("utf-8")
+        # If caller passed bytes or an already-serialized JSON string, send as-is
+        if isinstance(body, (bytes, bytearray)):
+            payload_bytes = bytes(body)
+        elif isinstance(body, str):
+            payload_bytes = body.encode("utf-8")
+        else:
+            payload_bytes = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
+
+        # Defensive: detect double-encoded JSON string bodies like '"{...}"' and unwrap them
+        try:
+            text = payload_bytes.decode("utf-8")
+            parsed = json.loads(text)
+            # If parsed is a str, it means the JSON payload was a JSON string containing JSON
+            unwrap_attempts = 0
+            while isinstance(parsed, str) and unwrap_attempts < 5:
+                try:
+                    parsed = json.loads(parsed)
+                except Exception:
+                    break
+                unwrap_attempts += 1
+
+            if not isinstance(parsed, (str, bytes)):
+                payload_bytes = json.dumps(parsed).encode("utf-8")
+        except Exception:
+            # If decoding or json loading fails, leave payload_bytes as-is
+            pass
 
     req = request.Request(url=url, method=method, data=payload_bytes, headers=headers)
 
