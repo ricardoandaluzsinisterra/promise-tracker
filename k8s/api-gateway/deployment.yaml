@@ -22,11 +22,11 @@ spec:
             - sh
             - -c
             - |
-              until nc -z promises-service 8000; do echo "waiting for promises-service"; sleep 2; done
-              until nc -z politicians-service 8000; do echo "waiting for politicians-service"; sleep 2; done
-              until nc -z trackers-service 8000; do echo "waiting for trackers-service"; sleep 2; done
-              until nc -z sources-service 8000; do echo "waiting for sources-service"; sleep 2; done
-              until nc -z projection-service 8000; do echo "waiting for projection-service"; sleep 2; done
+              until nc -z promises-service 80; do echo "waiting for promises-service"; sleep 2; done
+              until nc -z politicians-service 80; do echo "waiting for politicians-service"; sleep 2; done
+              until nc -z trackers-service 80; do echo "waiting for trackers-service"; sleep 2; done
+              until nc -z sources-service 80; do echo "waiting for sources-service"; sleep 2; done
+              until nc -z projection-service 80; do echo "waiting for projection-service"; sleep 2; done
       containers:
         - name: api-gateway
           image: api-gateway:latest
@@ -35,12 +35,12 @@ spec:
             - containerPort: 8000
           env:
             - name: PROMISES_SERVICE_URL
-              value: "http://promises-service:8000"
+              value: "http://promises-service:80"
             - name: POLITICIANS_SERVICE_URL
-              value: "http://politicians-service:8000"
+              value: "http://politicians-service:80"
             - name: TRACKERS_SERVICE_URL
-              value: "http://trackers-service:8000"
+              value: "http://trackers-service:80"
             - name: SOURCES_SERVICE_URL
-              value: "http://sources-service:8000"
+              value: "http://sources-service:80"
             - name: PROJECTION_SERVICE_URL
-              value: "http://projection-service:8000"
+              value: "http://projection-service:80"
