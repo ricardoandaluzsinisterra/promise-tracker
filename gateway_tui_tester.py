@@ -464,20 +464,12 @@ def run_command(
 
 
 def break_trackers_database(timeout: float) -> tuple[bool, str]:
-    command = [
-        "docker",
-        "compose",
-        "exec",
-        "-T",
-        "postgres-trackers",
-        "psql",
-        "-U",
-        "postgres",
-        "-d",
-        "trackers_db",
-        "-c",
-        "DROP TABLE IF EXISTS tracking_records CASCADE;",
-    ]
+    # Use kubectl to exec into the postgres-trackers pod and drop the table
+    shell_cmd = (
+        "kubectl exec -n default $(kubectl get pods -l app=postgres-trackers -n default "
+        "-o jsonpath='{.items[0].metadata.name}') -- psql -U postgres -d trackers_db -c \"DROP TABLE IF EXISTS tracking_records CASCADE;\""
+    )
+    command = ["sh", "-c", shell_cmd]
     return_code, stdout, stderr = run_command(command=command, timeout=timeout)
     if return_code != 0:
         return False, stderr.strip() or "Failed to drop tracking_records table"
@@ -487,14 +479,22 @@ def break_trackers_database(timeout: float) -> tuple[bool, str]:
 
 
 def restore_trackers_database(timeout: float) -> tuple[bool, str]:
-    command = ["docker", "compose", "restart", "trackers-service"]
-    return_code, stdout, stderr = run_command(command=command, timeout=timeout)
+    # Restart the Kubernetes deployment so the trackers-service recreates DB schema on startup
+    restart_cmd = [
+        "kubectl",
+        "rollout",
+        "restart",
+        "deployment/trackers-service",
+        "-n",
+        "default",
+    ]
+    return_code, stdout, stderr = run_command(command=restart_cmd, timeout=timeout)
     if return_code != 0:
-        return False, stderr.strip() or "Failed to restart trackers-service"
+        return False, stderr.strip() or "Failed to restart trackers-service deployment"
 
-    # The service runs create_all on startup, so restart restores missing tables.
+    # Wait a short while for the pod to cycle and initialize
     time.sleep(6)
-    output = stdout.strip() or "trackers-service restarted"
+    output = stdout.strip() or "trackers-service rollout restarted"
     return True, output
 
 
@@ -510,18 +510,12 @@ def publish_tracking_creation_failed_event(
         "politician_id": politician_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    command = [
-        "docker",
-        "compose",
-        "exec",
-        "-T",
-        "kafka",
-        "kafka-console-producer",
-        "--bootstrap-server",
-        "kafka:9092",
-        "--topic",
-        "tracking.events",
-    ]
+    # Use kubectl to exec into the kafka pod and run kafka-console-producer
+    shell_cmd = (
+        "kubectl exec -n default $(kubectl get pods -l app=kafka -n default -o jsonpath='{.items[0].metadata.name}') "
+        "-- kafka-console-producer --bootstrap-server kafka:9092 --topic tracking.events"
+    )
+    command = ["sh", "-c", shell_cmd]
     return_code, _stdout, stderr = run_command(
         command=command,
         timeout=timeout,
@@ -533,13 +527,8 @@ def publish_tracking_creation_failed_event(
 
 
 def fetch_compose_logs(timeout: float, tail: int = 1200) -> tuple[bool, str, str]:
-    command = [
-        "docker",
-        "compose",
-        "logs",
-        "--no-color",
-        "--tail",
-        str(tail),
+    # Collect logs from the cluster using kubectl. For each app label, gather recent logs.
+    apps = [
         "promises-service",
         "politicians-service",
         "trackers-service",
@@ -547,10 +536,33 @@ def fetch_compose_logs(timeout: float, tail: int = 1200) -> tuple[bool, str, str
         "projection-service",
         "kafka",
     ]
-    return_code, stdout, stderr = run_command(command=command, timeout=timeout)
-    if return_code != 0:
-        return False, stderr.strip() or "Failed to collect docker compose logs", ""
-    return True, "docker compose logs captured", stdout
+    outputs: list[str] = []
+    for app in apps:
+        header = f"=== LOGS for {app} ===\n"
+        # kubectl logs supports selector (-l) to target pods by label
+        cmd = [
+            "kubectl",
+            "logs",
+            "-n",
+            "default",
+            "-l",
+            f"app={app}",
+            "--tail",
+            str(tail),
+            "--all-containers=true",
+        ]
+        return_code, stdout, stderr = run_command(command=cmd, timeout=timeout)
+        if return_code != 0:
+            # Continue collecting other logs but include error note
+            outputs.append(header)
+            outputs.append(f"<failed to collect logs for {app}: {stderr.strip()}>\n")
+            continue
+
+        outputs.append(header)
+        outputs.append(stdout)
+
+    combined = "\n".join(outputs)
+    return True, "kubectl logs captured", combined
 
 
 def capture_filtered_logs(
