@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promises-service-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: promises-service
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: promises-service
+        version: v2
+    spec:
+      containers:
+        - name: promises-service
+          image: promises-service:v2
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
