@@ -6,7 +6,16 @@ spec:
   hosts:
     - politicians-service
   http:
-    - route:
+    - fault:
+        abort:
+          percentage:
+            value: 5
+          httpStatus: 503
+        delay:
+          percentage:
+            value: 10
+          fixedDelay: 5s
+      route:
         - destination:
             host: politicians-service
             subset: v1
