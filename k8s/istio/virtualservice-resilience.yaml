@@ -1,0 +1,71 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: politicians-service
+spec:
+  hosts:
+    - politicians-service
+  http:
+    - route:
+        - destination:
+            host: politicians-service
+            subset: v1
+      timeout: 3s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: gateway-error,connect-failure,retriable-4xx
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: trackers-service
+spec:
+  hosts:
+    - trackers-service
+  http:
+    - route:
+        - destination:
+            host: trackers-service
+            subset: v1
+      timeout: 3s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: gateway-error,connect-failure,retriable-4xx
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: sources-service
+spec:
+  hosts:
+    - sources-service
+  http:
+    - route:
+        - destination:
+            host: sources-service
+            subset: v1
+      timeout: 3s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: gateway-error,connect-failure,retriable-4xx
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: projection-service
+spec:
+  hosts:
+    - projection-service
+  http:
+    - route:
+        - destination:
+            host: projection-service
+            subset: v1
+      timeout: 3s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: gateway-error,connect-failure,retriable-4xx

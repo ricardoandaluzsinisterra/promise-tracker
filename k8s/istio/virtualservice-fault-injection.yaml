@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: politicians-service-fault
+spec:
+  hosts:
+    - politicians-service
+  http:
+    - fault:
+        abort:
+          percentage:
+            value: 5
+          httpStatus: 503
+        delay:
+          percentage:
+            value: 10
+          fixedDelay: 5s
+      route:
+        - destination:
+            host: politicians-service
+            subset: v1
+      timeout: 3s
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: gateway-error,connect-failure,retriable-4xx

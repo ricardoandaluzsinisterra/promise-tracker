@@ -4,6 +4,12 @@ metadata:
   name: promises-service
 spec:
   host: promises-service
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
   subsets:
     - name: v1
       labels:
@@ -18,6 +24,12 @@ metadata:
   name: politicians-service
 spec:
   host: politicians-service
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
   subsets:
     - name: v1
       labels:
@@ -29,6 +41,12 @@ metadata:
   name: sources-service
 spec:
   host: sources-service
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
   subsets:
     - name: v1
       labels:
@@ -40,6 +58,12 @@ metadata:
   name: trackers-service
 spec:
   host: trackers-service
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
   subsets:
     - name: v1
       labels:
@@ -51,6 +75,12 @@ metadata:
   name: projection-service
 spec:
   host: projection-service
+  trafficPolicy:
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
   subsets:
     - name: v1
       labels:
